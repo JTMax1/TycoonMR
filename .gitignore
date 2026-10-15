@@ -1,0 +1,80 @@
+# ==========================================
+# Unity Project .gitignore (Unity 6 / Quest)
+# ==========================================
+
+# Unity generated cache & temporary folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# Android / Native Build artifacts (Meta Quest)
+.utmp/
+[Uu]tmp/
+.gradle/
+*.apk
+*.aab
+*.obb
+
+# Asset Store / Package Cache
+Packages/Native/
+Packages/**/Tests/
+*.unitypackage
+
+# Visual Studio / Rider / VS Code project and solution files
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# IDE directories
+.vs/
+.idea/
+.vscode/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Crash reports and system info
+sysinfo.txt
+crashlytics-build.properties
+
+# ==========================================
+# Temporarily Stored Unused Asset Bundles
+# (Delete or comment out lines when you want to track them)
+# ==========================================
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Farm Ranch Pack/
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Farm Ranch Pack.meta
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Home Interior/
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Home Interior.meta
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Kitchen Food/
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Kitchen Food.meta
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Nature Environment Pack/
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Nature Environment Pack.meta
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Survival Crafting Pack/
+Assets/Pandazole_Lowpoly_Asset_Bundle/Pandazole Survival Crafting Pack.meta
