@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using TMPro;
+using Oculus.Interaction;
 
 [RequireComponent(typeof(AudioSource))]
 public class TycoonBoardManager : MonoBehaviour
@@ -11,10 +12,11 @@ public class TycoonBoardManager : MonoBehaviour
     [Header("1. Mixed Reality References")]
     public OVRPassthroughLayer passthroughLayer;
 
-    [Header("2. Custom Player Vehicle/Token Prefabs (Drag & Drop)")]
+    [Header("2. Custom Player Vehicle & Rival Avatar Prefabs (Drag & Drop)")]
     public GameObject dicePrefab;
     public GameObject playerTokenPrefab;
     public GameObject aiRivalTokenPrefab;
+    public GameObject rivalAvatarPrefab;
 
     [Header("3. Chronological Building Prefab Holders (Levels 1 to 5)")]
     public GameObject level1HousePrefab;
@@ -29,7 +31,6 @@ public class TycoonBoardManager : MonoBehaviour
     public GameObject streetlightPrefab;
     public GameObject ambientTrafficCar1Prefab;
     public GameObject ambientTrafficCar2Prefab;
-    [Tooltip("Optional: Drag a Helicopter or Drone prefab here to orbit the VIP Helipad!")]
     public GameObject vipHelicopterPrefab;
 
     [Header("5. Optional Custom Sound Effects")]
@@ -71,17 +72,33 @@ public class TycoonBoardManager : MonoBehaviour
     private Transform[] playerTokens = new Transform[2];
     private int buildCycleCursor = 0;
 
-    // Free Parking Jackpot Pool (Accumulates all Taxes & Fines!)
     private int freeParkingJackpot = 100;
     private Transform jackpotGoldPile;
 
-    private enum TurnState { WaitingForRoll, Moving, BuyOrPassDecision, AITurn }
+    private enum TurnState { WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AITurn }
     private TurnState currentState = TurnState.WaitingForRoll;
     private int lastDiceTotal = 0;
     private int consecutiveDoubles = 0;
 
     private Transform die1Transform;
     private Transform die2Transform;
+    private PhysicalThrowDie physDie1;
+    private PhysicalThrowDie physDie2;
+    private bool isPlayerHoldingDice = false;
+
+    private GameObject grabbableDeedCrystal;
+    private bool isHoldingDeedCrystal = false;
+
+    private Transform rivalAvatarRoot;
+    private Transform rivalHeadTransform;
+    private Transform rivalLeftHandTransform;
+    private Transform rivalRightHandTransform;
+    private Renderer rivalVisorRenderer;
+    private TextMeshProUGUI rivalSpeechBubbleTMP;
+    private enum AvatarMood { Neutral, HappyCheer, AngrySlam, Thinking }
+    private AvatarMood currentRivalMood = AvatarMood.Neutral;
+    private float moodResetTimer = 0f;
+
     private TextMeshProUGUI dashboardTitleTMP;
     private TextMeshProUGUI dashboardBodyTMP;
     private TextMeshProUGUI dashboardPromptTMP;
@@ -91,7 +108,6 @@ public class TycoonBoardManager : MonoBehaviour
     private TextMeshProUGUI deedTitleTMP;
     private TextMeshProUGUI deedBodyTMP;
 
-    // Courtyard Traffic, VIP Chopper & Monopoly Synergy Beams
     private List<Transform> ambientCars = new List<Transform>();
     private List<float> ambientCarProgress = new List<float>();
     private List<Light> cityNightLights = new List<Light>();
@@ -107,15 +123,17 @@ public class TycoonBoardManager : MonoBehaviour
     private AudioSource sfxSource;
     private Material masterURPMaterial;
 
-    private Transform[] buttonTransforms = new Transform[8];
+    private Transform[] buttonTransforms = new Transform[9];
     private float lastButtonTouchTime = 0f;
 
-    private Transform leftHandPointer;
-    private Transform rightHandPointer;
-    private Transform leftHandAnchor;
-    private Transform rightHandAnchor;
-    private Transform centerEyeAnchor;
-    private Transform trackingSpaceTransform;
+    // Meta XR Interaction SDK Hand & Poke References
+    private PokeInteractor[] scenePokeInteractors;
+    private OVRHand[] sceneOVRHands;
+    private Transform activeHandGrabTransform;
+    private Vector3 leftHandWorldPos = new Vector3(0f, -100f, 0f);
+    private Vector3 rightHandWorldPos = new Vector3(0f, -100f, 0f);
+    private bool isLeftHandTracked = false;
+    private bool isRightHandTracked = false;
 
     private bool isTwoHandManipulating = false;
     private float initialTwoHandDistance = 0.3f;
@@ -130,29 +148,72 @@ public class TycoonBoardManager : MonoBehaviour
 
     private bool isMarketNightMode = false;
     private bool isInPenthouseVR = false;
-    private Vector3 savedBoardPosition;
-    private Quaternion savedBoardRotation;
+    private Vector3 lockedBoardPosition = new Vector3(0f, -0.34f, 0.88f);
+    private Quaternion lockedBoardRotation = Quaternion.identity;
+    private bool hasLockedInitialPose = false;
 
     private bool wasRightPinching = false;
     private bool wasLeftPinching = false;
 
+    void Awake()
+    {
+        // Keep Meta's 'Locomotor' disabled so it NEVER drops the player camera into the abyss!
+        GameObject locomotorObj = GameObject.Find("Locomotor");
+        if (locomotorObj != null) locomotorObj.SetActive(false);
+
+        // Hide any sample white '[BuildingBlock] Cube' if Distance Grab spawned one
+        GameObject sampleCube = GameObject.Find("[BuildingBlock] Cube");
+        if (sampleCube != null) sampleCube.SetActive(false);
+
+        Rigidbody boardRb = GetComponent<Rigidbody>();
+        if (boardRb != null) Destroy(boardRb);
+
+        EnforceUnderlayPassthrough();
+    }
+
+   void EnforceUnderlayPassthrough()
+    {
+        OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>(FindObjectsSortMode.None);
+        for (int i = 0; i < layers.Length; i++)
+        {
+            if (layers[i] == null) continue;
+            // overlayType and compositionDepth were removed in recent Meta XR SDKs.
+            // The [BuildingBlock] Passthrough handles the background underlay automatically.
+            if (passthroughLayer == null) passthroughLayer = layers[i];
+        }
+    }
+
+    void StripRoguePhysicsFromImportedPrefab(GameObject spawnedInstance)
+    {
+        if (spawnedInstance == null) return;
+        Rigidbody[] rbs = spawnedInstance.GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < rbs.Length; i++) Destroy(rbs[i]);
+
+        Collider[] cols = spawnedInstance.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < cols.Length; i++) Destroy(cols[i]);
+    }
+
     void Start()
     {
         boardSize = 1.05f;
-        if (currentBoardScale < 0.4f || currentBoardScale > 1.8f) currentBoardScale = 0.85f;
+        currentBoardScale = 0.85f;
         transform.localScale = Vector3.one * currentBoardScale;
+        lastButtonTouchTime = Time.time + 1.5f;
 
         sfxSource = GetComponent<AudioSource>();
+        sfxSource.playOnAwake = false;
         sfxSource.spatialBlend = 0.5f;
         GenerateProceduralSFX();
 
         InitializeMasterURPMaterial();
-        FindXRAnchorsSafely();
+        CacheMetaInteractionSDKHands();
         InitializeOfficialMonopolyMap();
         Build40TileClockwiseTable();
         BuildLivingCenterCourtyard();
+        Create3DRivalMogulAvatar();
         Create3DDiceAndHighDashboard();
         Create3DDeedCardPopup();
+        CreateGrabbable3DDeedCrystal();
         Create3DTouchButtonsOnTable();
         CreateFloatingVRControls();
         CreatePlayerTokens();
@@ -163,14 +224,14 @@ public class TycoonBoardManager : MonoBehaviour
 
         if (OVRManager.display != null)
         {
-            OVRManager.display.RecenteredPose += RecenterBoardInFrontOfPlayer;
+            OVRManager.display.RecenteredPose += OnSystemRecenterPose;
         }
 
-        StartCoroutine(AutoRecenterWhenXRTrackingReady());
+        StartCoroutine(LockBoardInFrontOfPlayerOnStart());
 
         RefreshDashboard(
-            "YOUR TURN — TOUCH [ROLL DICE] OR PINCH",
-            "Pinch BOTH hands together to Move/Shrink/Grow the board!"
+            "YOUR TURN — DISTANCE-GRAB & THROW DICE!",
+            "Point & Pinch with your hand to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
         );
     }
 
@@ -178,8 +239,88 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (OVRManager.display != null)
         {
-            OVRManager.display.RecenteredPose -= RecenterBoardInFrontOfPlayer;
+            OVRManager.display.RecenteredPose -= OnSystemRecenterPose;
         }
+    }
+
+    void LateUpdate()
+    {
+        if (hasLockedInitialPose && !isInPenthouseVR && !isTwoHandManipulating)
+        {
+            transform.position = lockedBoardPosition;
+            transform.rotation = lockedBoardRotation;
+            transform.localScale = Vector3.one * currentBoardScale;
+        }
+    }
+
+    void OnSystemRecenterPose()
+    {
+        lastButtonTouchTime = Time.time + 1.0f;
+        StartCoroutine(DelayedRecenterCoroutine());
+    }
+
+    IEnumerator DelayedRecenterCoroutine()
+    {
+        yield return new WaitForSeconds(0.15f);
+        RecenterBoardInFrontOfPlayer();
+    }
+
+    IEnumerator LockBoardInFrontOfPlayerOnStart()
+    {
+        lockedBoardPosition = new Vector3(0f, -0.34f, 0.88f);
+        lockedBoardRotation = Quaternion.identity;
+        transform.position = lockedBoardPosition;
+        transform.rotation = lockedBoardRotation;
+        hasLockedInitialPose = true;
+
+        yield return new WaitForSeconds(0.45f);
+        EnforceUnderlayPassthrough();
+        CacheMetaInteractionSDKHands();
+        RecenterBoardInFrontOfPlayer();
+    }
+
+    public void RecenterBoardInFrontOfPlayer()
+    {
+        if (isInPenthouseVR) return;
+        lastButtonTouchTime = Time.time + 0.8f;
+
+        Transform eye = Camera.main != null ? Camera.main.transform : null;
+        if (eye == null)
+        {
+            OVRCameraRig rig = Object.FindAnyObjectByType<OVRCameraRig>();
+            if (rig != null) eye = rig.centerEyeAnchor;
+        }
+        if (eye == null) return;
+
+        Vector3 eyePos = eye.position;
+        if (float.IsNaN(eyePos.x) || float.IsNaN(eyePos.y) || float.IsNaN(eyePos.z) || eyePos.magnitude > 50f)
+        {
+            eyePos = Vector3.zero;
+        }
+
+        Vector3 forwardFlat = new Vector3(eye.forward.x, 0f, eye.forward.z);
+        if (forwardFlat.sqrMagnitude < 0.001f) forwardFlat = Vector3.forward;
+        else forwardFlat.Normalize();
+
+        float halfBoardWorld = (boardSize * currentBoardScale) * 0.5f;
+        float forwardDistance = halfBoardWorld + 0.42f;
+
+        transform.localScale = Vector3.one * currentBoardScale;
+        lockedBoardPosition = eyePos + (forwardFlat * forwardDistance) + new Vector3(0f, -0.34f, 0f);
+        lockedBoardRotation = Quaternion.LookRotation(forwardFlat, Vector3.up);
+
+        transform.position = lockedBoardPosition;
+        transform.rotation = lockedBoardRotation;
+        hasLockedInitialPose = true;
+    }
+
+    public void AdjustBoardScale(float delta)
+    {
+        if (isInPenthouseVR) return;
+        currentBoardScale = Mathf.Clamp(currentBoardScale + delta, 0.45f, 1.55f);
+        transform.localScale = Vector3.one * currentBoardScale;
+        PlaySFX(buildUpgradeSound, procStepClip, delta > 0 ? 1.15f : 0.85f);
+        RefreshDashboard($"BOARD SIZE: {(int)(currentBoardScale * 100)}%", "Touch [- SHRINK] / [+ GROW] or Pinch BOTH hands to move & resize!");
     }
 
     void InitializeMasterURPMaterial()
@@ -219,99 +360,173 @@ public class TycoonBoardManager : MonoBehaviour
         return m;
     }
 
-    IEnumerator AutoRecenterWhenXRTrackingReady()
+    void CacheMetaInteractionSDKHands()
     {
-        yield return new WaitForSeconds(0.3f);
-        RecenterBoardInFrontOfPlayer();
-        yield return new WaitForSeconds(0.8f);
-        RecenterBoardInFrontOfPlayer();
+        scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>();
+        sceneOVRHands = Object.FindObjectsByType<OVRHand>();
+
+        if (activeHandGrabTransform == null)
+        {
+            GameObject holder = new GameObject("ISDK_Active_Hand_GrabPoint");
+            activeHandGrabTransform = holder.transform;
+        }
     }
 
-    public void RecenterBoardInFrontOfPlayer()
+    // --- READS BOTH META INTERACTIONS RIG (`OVRHand` / `PokeInteractor`) AND HARDWARE `OVRPlugin` ---
+    void ReadMetaISDKHands(out bool rightPinchDown, out bool leftPinchDown, out bool isRightPinching, out bool isLeftPinching)
     {
-        if (isInPenthouseVR) return;
-        FindXRAnchorsSafely();
+        rightPinchDown = false;
+        leftPinchDown = false;
+        isRightPinching = false;
+        isLeftPinching = false;
+        isLeftHandTracked = false;
+        isRightHandTracked = false;
+        leftHandWorldPos = new Vector3(0f, -100f, 0f);
+        rightHandWorldPos = new Vector3(0f, -100f, 0f);
 
-        Transform eye = centerEyeAnchor != null ? centerEyeAnchor : (Camera.main != null ? Camera.main.transform : null);
-        if (eye == null) return;
-
-        Vector3 forwardFlat = new Vector3(eye.forward.x, 0f, eye.forward.z).normalized;
-        if (forwardFlat.sqrMagnitude < 0.01f) forwardFlat = Vector3.forward;
-
-        float halfBoardWorld = (boardSize * currentBoardScale) * 0.5f;
-        float forwardDistance = halfBoardWorld + 0.42f;
-
-        transform.localScale = Vector3.one * currentBoardScale;
-        transform.position = eye.position + (forwardFlat * forwardDistance) + new Vector3(0f, -0.34f, 0f);
-        transform.rotation = Quaternion.LookRotation(forwardFlat);
-
-        savedBoardPosition = transform.position;
-        savedBoardRotation = transform.rotation;
-    }
-
-    public void AdjustBoardScale(float delta)
-    {
-        if (isInPenthouseVR) return;
-        currentBoardScale = Mathf.Clamp(currentBoardScale + delta, 0.45f, 1.55f);
-        transform.localScale = Vector3.one * currentBoardScale;
-        PlaySFX(buildUpgradeSound, procStepClip, delta > 0 ? 1.15f : 0.85f);
-        RefreshDashboard($"BOARD SIZE: {(int)(currentBoardScale * 100)}%", "Touch [- SHRINK] / [+ GROW] or Pinch BOTH hands to move & resize!");
-    }
-
-    void FindXRAnchorsSafely()
-    {
-        if (centerEyeAnchor == null)
+        // 1. Read Index Fingertip Poke Positions directly from Meta's PokeInteractor (Interactions Rig)!
+        if (scenePokeInteractors == null || scenePokeInteractors.Length == 0)
         {
-            GameObject centerObj = GameObject.Find("CenterEyeAnchor");
-            if (centerObj != null) centerEyeAnchor = centerObj.transform;
-            else if (Camera.main != null) centerEyeAnchor = Camera.main.transform;
+            scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>();
         }
 
-        if (trackingSpaceTransform == null)
+        if (scenePokeInteractors != null)
         {
-            GameObject tsObj = GameObject.Find("TrackingSpace");
-            if (tsObj != null) trackingSpaceTransform = tsObj.transform;
-            else if (centerEyeAnchor != null && centerEyeAnchor.parent != null) trackingSpaceTransform = centerEyeAnchor.parent;
+            for (int i = 0; i < scenePokeInteractors.Length; i++)
+            {
+                PokeInteractor pi = scenePokeInteractors[i];
+                if (pi == null || !pi.gameObject.activeInHierarchy) continue;
+
+                // PokeInteractor.Origin is the exact index fingertip point computed by Meta XR Interaction SDK!
+                Vector3 tipPos = pi.Origin != Vector3.zero ? pi.Origin : pi.transform.position;
+                if (tipPos.sqrMagnitude < 0.0001f) continue;
+
+                if (i == 0)
+                {
+                    leftHandWorldPos = tipPos;
+                    isLeftHandTracked = true;
+                }
+                else
+                {
+                    rightHandWorldPos = tipPos;
+                    isRightHandTracked = true;
+                }
+            }
         }
 
-        if (leftHandAnchor == null)
+        // 2. Read Pinch Gestures & Hand Positions from Meta's OVRHand (BuildingBlock Hand Tracking / Real Hands)
+        if (sceneOVRHands == null || sceneOVRHands.Length == 0)
         {
-            GameObject leftObj = GameObject.Find("LeftHandAnchor");
-            if (leftObj != null) leftHandAnchor = leftObj.transform;
+            sceneOVRHands = Object.FindObjectsByType<OVRHand>();
         }
 
-        if (rightHandAnchor == null)
+        if (sceneOVRHands != null)
         {
-            GameObject rightObj = GameObject.Find("RightHandAnchor");
-            if (rightObj != null) rightHandAnchor = rightObj.transform;
+            foreach (OVRHand hand in sceneOVRHands)
+            {
+                if (hand == null || !hand.IsTracked) continue;
+
+                bool pinching = hand.GetFingerIsPinching(OVRHand.HandFinger.Index) ||
+                                hand.GetFingerPinchStrength(OVRHand.HandFinger.Index) > 0.65f;
+
+                Vector3 ptrPos = hand.PointerPose != null ? hand.PointerPose.position : hand.transform.position;
+                bool isLeft = hand.name.ToLower().Contains("left");
+
+                if (isLeft)
+                {
+                    isLeftHandTracked = true;
+                    isLeftPinching |= pinching;
+                    if (leftHandWorldPos.y < -50f) leftHandWorldPos = ptrPos;
+                }
+                else
+                {
+                    isRightHandTracked = true;
+                    isRightPinching |= pinching;
+                    if (rightHandWorldPos.y < -50f) rightHandWorldPos = ptrPos;
+                }
+            }
         }
 
-        if (leftHandPointer == null)
+        // 3. Fallback to OVRPlugin if OVRHand component wasn't found yet
+        if (!isLeftHandTracked && !isRightHandTracked)
         {
-            Material pointerMat = CreateColoredMaterial(new Color(0.10f, 0.95f, 1f), 0.95f);
+            try
+            {
+                OVRPlugin.HandState leftState = new OVRPlugin.HandState();
+                OVRPlugin.HandState rightState = new OVRPlugin.HandState();
+                Transform refSpace = Camera.main != null && Camera.main.transform.parent != null ? Camera.main.transform.parent : transform;
 
-            leftHandPointer = GameObject.CreatePrimitive(PrimitiveType.Sphere).transform;
-            leftHandPointer.name = "Left_IndexTip_Orb";
-            leftHandPointer.localScale = Vector3.one * 0.022f;
-            Destroy(leftHandPointer.GetComponent<Collider>());
-            leftHandPointer.GetComponent<Renderer>().material = pointerMat;
+                if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandRight, ref rightState) &&
+                    (rightState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
+                {
+                    isRightHandTracked = true;
+                    Vector3 wristLocal = new Vector3(rightState.RootPose.Position.x, rightState.RootPose.Position.y, -rightState.RootPose.Position.z);
+                    rightHandWorldPos = refSpace.TransformPoint(wristLocal);
+                    isRightPinching = (rightState.Pinches & OVRPlugin.HandFingerPinch.Index) != 0;
+                }
 
-            rightHandPointer = GameObject.CreatePrimitive(PrimitiveType.Sphere).transform;
-            rightHandPointer.name = "Right_IndexTip_Orb";
-            rightHandPointer.localScale = Vector3.one * 0.022f;
-            Destroy(rightHandPointer.GetComponent<Collider>());
-            rightHandPointer.GetComponent<Renderer>().material = pointerMat;
+                if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandLeft, ref leftState) &&
+                    (leftState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
+                {
+                    isLeftHandTracked = true;
+                    Vector3 wristLocal = new Vector3(leftState.RootPose.Position.x, leftState.RootPose.Position.y, -leftState.RootPose.Position.z);
+                    leftHandWorldPos = refSpace.TransformPoint(wristLocal);
+                    isLeftPinching = (leftState.Pinches & OVRPlugin.HandFingerPinch.Index) != 0;
+                }
+            }
+            catch { }
         }
+
+        // Two-Hand Pinch Move & Scale
+        if (!isInPenthouseVR && !isPlayerHoldingDice && isRightHandTracked && isLeftHandTracked && isRightPinching && isLeftPinching)
+        {
+            Vector3 midPoint = (leftHandWorldPos + rightHandWorldPos) * 0.5f;
+            float handDist = Vector3.Distance(leftHandWorldPos, rightHandWorldPos);
+
+            if (!isTwoHandManipulating)
+            {
+                isTwoHandManipulating = true;
+                initialTwoHandDistance = Mathf.Max(0.08f, handDist);
+                initialScaleOnGrab = currentBoardScale;
+                initialGrabMidpoint = midPoint;
+                initialBoardPosOnGrab = lockedBoardPosition;
+            }
+            else
+            {
+                float scaleFactor = handDist / initialTwoHandDistance;
+                currentBoardScale = Mathf.Clamp(initialScaleOnGrab * scaleFactor, 0.40f, 1.65f);
+                transform.localScale = Vector3.one * currentBoardScale;
+
+                lockedBoardPosition = initialBoardPosOnGrab + (midPoint - initialGrabMidpoint);
+                transform.position = lockedBoardPosition;
+            }
+
+            wasRightPinching = true;
+            wasLeftPinching = true;
+            return;
+        }
+        else
+        {
+            isTwoHandManipulating = false;
+        }
+
+        rightPinchDown = isRightPinching && !wasRightPinching;
+        leftPinchDown = isLeftPinching && !wasLeftPinching;
+        wasRightPinching = isRightPinching;
+        wasLeftPinching = isLeftPinching;
     }
 
     void Update()
     {
         UpdateAmbientCourtyardTrafficAndChopper();
+        AnimateRivalMogulAvatar();
+        AnimateFloatingDeedCrystal();
 
         bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
         bool buyPressed = Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame;
         bool passPressed = Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame;
         bool upgradePressed = Keyboard.current != null && Keyboard.current.uKey.wasPressedThisFrame;
+        bool takeoverPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
         bool moodPressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
         bool vrViewPressed = Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame;
         bool recenterPressed = Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
@@ -322,23 +537,24 @@ public class TycoonBoardManager : MonoBehaviour
         if (shrinkPressed) AdjustBoardScale(-0.12f);
         if (growPressed) AdjustBoardScale(0.12f);
 
-        bool rightPinch = false;
-        bool leftPinch = false;
-        UpdateIndexTipPointersAndPinches(out rightPinch, out leftPinch);
+        bool rightPinchDown = false;
+        bool leftPinchDown = false;
+        bool rightPinchHeld = false;
+        bool leftPinchHeld = false;
+        ReadMetaISDKHands(out rightPinchDown, out leftPinchDown, out rightPinchHeld, out leftPinchHeld);
 
-        // --- FULL-VR PENTHOUSE VIEW CONTROLS (EXIT OR TELEPORT TO SKYSCRAPER ROOFTOP!) ---
         if (isInPenthouseVR)
         {
             KeepVRControlsInFrontOfPlayer();
-            if (Time.time - lastButtonTouchTime > 0.6f)
+            if (Time.time > lastButtonTouchTime)
             {
                 if (vrExitFloatingButton != null)
                 {
-                    float dR = Vector3.Distance(rightHandPointer.position, vrExitFloatingButton.transform.position);
-                    float dL = Vector3.Distance(leftHandPointer.position, vrExitFloatingButton.transform.position);
+                    float dR = isRightHandTracked ? Vector3.Distance(rightHandWorldPos, vrExitFloatingButton.transform.position) : 99f;
+                    float dL = isLeftHandTracked ? Vector3.Distance(leftHandWorldPos, vrExitFloatingButton.transform.position) : 99f;
                     if (dR < 0.13f || dL < 0.13f)
                     {
-                        lastButtonTouchTime = Time.time;
+                        lastButtonTouchTime = Time.time + 0.65f;
                         TogglePenthouseScaleShift();
                         return;
                     }
@@ -346,18 +562,18 @@ public class TycoonBoardManager : MonoBehaviour
 
                 if (vrRooftopTeleportButton != null)
                 {
-                    float dR = Vector3.Distance(rightHandPointer.position, vrRooftopTeleportButton.transform.position);
-                    float dL = Vector3.Distance(leftHandPointer.position, vrRooftopTeleportButton.transform.position);
-                    if (dR < 0.13f || dL < 0.13f || leftPinch)
+                    float dR = isRightHandTracked ? Vector3.Distance(rightHandWorldPos, vrRooftopTeleportButton.transform.position) : 99f;
+                    float dL = isLeftHandTracked ? Vector3.Distance(leftHandWorldPos, vrRooftopTeleportButton.transform.position) : 99f;
+                    if (dR < 0.13f || dL < 0.13f || leftPinchDown)
                     {
-                        lastButtonTouchTime = Time.time;
+                        lastButtonTouchTime = Time.time + 0.65f;
                         ToggleRooftopVantagePoint();
                         return;
                     }
                 }
             }
 
-            if (vrViewPressed || rightPinch)
+            if (vrViewPressed || rightPinchDown)
             {
                 TogglePenthouseScaleShift();
             }
@@ -371,29 +587,42 @@ public class TycoonBoardManager : MonoBehaviour
         else if (touchedButton == 1) buyPressed = true;
         else if (touchedButton == 2) passPressed = true;
         else if (touchedButton == 3) upgradePressed = true;
-        else if (touchedButton == 4) vrViewPressed = true;
-        else if (touchedButton == 5) AdjustBoardScale(-0.12f);
-        else if (touchedButton == 6) AdjustBoardScale(0.12f);
-        else if (touchedButton == 7) RecenterBoardInFrontOfPlayer();
+        else if (touchedButton == 4) takeoverPressed = true;
+        else if (touchedButton == 5) vrViewPressed = true;
+        else if (touchedButton == 6) AdjustBoardScale(-0.12f);
+        else if (touchedButton == 7) AdjustBoardScale(0.12f);
+        else if (touchedButton == 8) RecenterBoardInFrontOfPlayer();
 
-        if (currentState == TurnState.WaitingForRoll)
+        // Only trigger Distance Grab / Hand Grab if the player didn't just poke a button!
+        if (touchedButton == -1)
         {
-            if (spacePressed || rightPinch)
+            HandlePhysicalDiceGrabAndThrow(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
+            HandlePhysicalDeedCrystalGrab(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
+        }
+
+        if (takeoverPressed && (currentState == TurnState.WaitingForRoll || currentState == TurnState.BuyOrPassDecision))
+        {
+            TryExecuteHostileTakeover();
+        }
+
+        if (currentState == TurnState.WaitingForRoll && !isPlayerHoldingDice)
+        {
+            if (spacePressed)
             {
-                StartCoroutine(ExecutePlayerTurn());
+                StartCoroutine(ExecutePhysicsDiceRollTurn(true));
             }
-            else if (upgradePressed || leftPinch)
+            else if (upgradePressed)
             {
                 TryBuildChronologically(0);
             }
         }
-        else if (currentState == TurnState.BuyOrPassDecision)
+        else if (currentState == TurnState.BuyOrPassDecision && !isHoldingDeedCrystal)
         {
-            if (buyPressed || spacePressed || rightPinch)
+            if (buyPressed || spacePressed)
             {
                 PurchaseCurrentTile(0);
             }
-            else if (passPressed || leftPinch)
+            else if (passPressed || leftPinchDown)
             {
                 HideDeedCard();
                 RefreshDashboard("PASSED ON DEED", "Passing turn to Rival Mogul...");
@@ -409,7 +638,327 @@ public class TycoonBoardManager : MonoBehaviour
         if (vrViewPressed) TogglePenthouseScaleShift();
     }
 
-    // --- 3D FLYING GOLD COINS ANIMATION (Visualizes Every Rent, Salary, Tax & Purchase!) ---
+    // --- DISTANCE GRAB (PULL INTERACTABLE TO HAND) & HAND GRAB FOR DICE ---
+    void HandlePhysicalDiceGrabAndThrow(bool rPinchDown, bool lPinchDown, bool rPinchHeld, bool lPinchHeld)
+    {
+        if (currentState != TurnState.WaitingForRoll || physDie1 == null || physDie2 == null) return;
+
+        bool usingRight = rPinchDown || rPinchHeld;
+        Vector3 activeHandPos = usingRight ? rightHandWorldPos : leftHandWorldPos;
+        if (activeHandGrabTransform != null) activeHandGrabTransform.position = activeHandPos;
+
+        // Also check if Meta's native Grabbable component on the dice was grabbed directly by the Interactions Rig!
+        if (!isPlayerHoldingDice && (physDie1.isHeldByPlayer || physDie2.isHeldByPlayer))
+        {
+            isPlayerHoldingDice = true;
+            PlaySFX(diceRollSound, procDiceClip, 1.1f);
+            RefreshDashboard("HOLDING 3D DICE IN HAND!", "Shake your hand and release your pinch to THROW the dice onto the board!");
+            return;
+        }
+
+        // Distance Grab (Pull Interactable To Hand): Pinch from up to 1.25 meters away to magnet-pull the dice into your hand!
+        if (!isPlayerHoldingDice && (rPinchDown || lPinchDown))
+        {
+            float distToDice = Vector3.Distance(activeHandPos, die1Transform.position);
+            if (distToDice < 1.25f && activeHandGrabTransform != null)
+            {
+                isPlayerHoldingDice = true;
+                physDie1.BeginHandGrab(activeHandGrabTransform, new Vector3(-0.028f, 0f, 0f));
+                physDie2.BeginHandGrab(activeHandGrabTransform, new Vector3(0.028f, 0f, 0f));
+                PlaySFX(diceRollSound, procDiceClip, 1.15f);
+                RefreshDashboard("DISTANCE-PULLED 3D DICE TO HAND!", "Shake your hand and release your pinch to THROW the dice onto Central Park!");
+            }
+        }
+        else if (isPlayerHoldingDice)
+        {
+            if (!rPinchHeld && !lPinchHeld)
+            {
+                isPlayerHoldingDice = false;
+                StartCoroutine(ExecutePhysicsDiceRollTurn(false));
+            }
+        }
+    }
+
+    // --- DISTANCE GRAB & HAND GRAB FOR 3D TITLE DEED CRYSTAL ---
+    void HandlePhysicalDeedCrystalGrab(bool rPinchDown, bool lPinchDown, bool rPinchHeld, bool lPinchHeld)
+    {
+        if (currentState != TurnState.BuyOrPassDecision || grabbableDeedCrystal == null || !grabbableDeedCrystal.activeSelf) return;
+
+        // Right-hand pinch pulls the 3D Title Deed Crystal into your hand from up to 1.2m away!
+        if (!isHoldingDeedCrystal && rPinchDown)
+        {
+            if (Vector3.Distance(rightHandWorldPos, grabbableDeedCrystal.transform.position) < 1.20f)
+            {
+                isHoldingDeedCrystal = true;
+                PlaySFX(tokenMoveSound, procStepClip, 1.2f);
+                RefreshDashboard("PULLED TITLE DEED CRYSTAL TO HAND!", "Release your pinch (or slam onto the board) to purchase this property!");
+            }
+        }
+        else if (isHoldingDeedCrystal)
+        {
+            grabbableDeedCrystal.transform.position = Vector3.Lerp(grabbableDeedCrystal.transform.position, rightHandWorldPos, Time.deltaTime * 24f);
+
+            if (!rPinchHeld || grabbableDeedCrystal.transform.localPosition.y < 0.08f)
+            {
+                isHoldingDeedCrystal = false;
+                PurchaseCurrentTile(0);
+            }
+        }
+    }
+
+    void CreateGrabbable3DDeedCrystal()
+    {
+        grabbableDeedCrystal = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        grabbableDeedCrystal.name = "Grabbable_3D_Deed_Crystal";
+        grabbableDeedCrystal.transform.SetParent(transform, false);
+        grabbableDeedCrystal.transform.localPosition = new Vector3(0.24f, 0.24f, -0.18f);
+        grabbableDeedCrystal.transform.localRotation = Quaternion.Euler(45f, 45f, 0f);
+        grabbableDeedCrystal.transform.localScale = Vector3.one * 0.055f;
+        Destroy(grabbableDeedCrystal.GetComponent<Collider>());
+        grabbableDeedCrystal.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.84f, 0.22f), 0.95f, 0.85f);
+        grabbableDeedCrystal.SetActive(false);
+    }
+
+    void AnimateFloatingDeedCrystal()
+    {
+        if (grabbableDeedCrystal == null || !grabbableDeedCrystal.activeSelf || isHoldingDeedCrystal) return;
+        grabbableDeedCrystal.transform.Rotate(Vector3.up, 65f * Time.deltaTime, Space.World);
+        grabbableDeedCrystal.transform.localPosition = new Vector3(0.24f, 0.24f + Mathf.Sin(Time.time * 3f) * 0.015f, -0.18f);
+    }
+
+    void Create3DRivalMogulAvatar()
+    {
+        GameObject avatarHolder = new GameObject("Rival_Mogul_3D_Avatar");
+        avatarHolder.transform.SetParent(transform, false);
+        avatarHolder.transform.localPosition = new Vector3(0f, 0.14f, (boardSize * 0.5f) + 0.22f);
+        avatarHolder.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        rivalAvatarRoot = avatarHolder.transform;
+
+        if (rivalAvatarPrefab != null && rivalAvatarPrefab.GetComponent<OVRCameraRig>() == null)
+        {
+            GameObject customModel = Instantiate(rivalAvatarPrefab, avatarHolder.transform);
+            StripRoguePhysicsFromImportedPrefab(customModel);
+            customModel.transform.localPosition = Vector3.zero;
+            NormalizePrefabSize(customModel, 0.35f);
+            rivalHeadTransform = customModel.transform;
+        }
+        else
+        {
+            Material suitMat = CreateColoredMaterial(new Color(0.10f, 0.12f, 0.18f), 0.85f, 0.4f);
+            Material goldLapelMat = CreateColoredMaterial(new Color(0.92f, 0.74f, 0.22f), 0.9f, 0.85f);
+            Material headMat = CreateColoredMaterial(new Color(0.82f, 0.86f, 0.94f), 0.9f, 0.7f);
+            Material visorMat = CreateColoredMaterial(new Color(0.15f, 0.88f, 1f), 0.95f);
+
+            GameObject torso = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            torso.name = "Mogul_Torso";
+            torso.transform.SetParent(avatarHolder.transform, false);
+            torso.transform.localPosition = new Vector3(0f, -0.04f, 0f);
+            torso.transform.localScale = new Vector3(0.18f, 0.14f, 0.11f);
+            Destroy(torso.GetComponent<Collider>());
+            torso.GetComponent<Renderer>().material = suitMat;
+
+            GameObject tie = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            tie.name = "Mogul_Gold_Tie";
+            tie.transform.SetParent(torso.transform, false);
+            tie.transform.localPosition = new Vector3(0f, 0.25f, 0.48f);
+            tie.transform.localScale = new Vector3(0.18f, 0.55f, 0.12f);
+            Destroy(tie.GetComponent<Collider>());
+            tie.GetComponent<Renderer>().material = goldLapelMat;
+
+            GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            head.name = "Mogul_Head";
+            head.transform.SetParent(avatarHolder.transform, false);
+            head.transform.localPosition = new Vector3(0f, 0.16f, 0f);
+            head.transform.localScale = new Vector3(0.12f, 0.135f, 0.12f);
+            Destroy(head.GetComponent<Collider>());
+            head.GetComponent<Renderer>().material = headMat;
+            rivalHeadTransform = head.transform;
+
+            GameObject visor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            visor.name = "Mogul_Visor";
+            visor.transform.SetParent(head.transform, false);
+            visor.transform.localPosition = new Vector3(0f, 0.08f, 0.44f);
+            visor.transform.localScale = new Vector3(0.72f, 0.22f, 0.22f);
+            Destroy(visor.GetComponent<Collider>());
+            rivalVisorRenderer = visor.GetComponent<Renderer>();
+            rivalVisorRenderer.material = visorMat;
+
+            GameObject lHand = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            lHand.name = "Mogul_Left_Hand";
+            lHand.transform.SetParent(avatarHolder.transform, false);
+            lHand.transform.localPosition = new Vector3(-0.16f, 0.02f, 0.10f);
+            lHand.transform.localScale = new Vector3(0.045f, 0.035f, 0.055f);
+            Destroy(lHand.GetComponent<Collider>());
+            lHand.GetComponent<Renderer>().material = goldLapelMat;
+            rivalLeftHandTransform = lHand.transform;
+
+            GameObject rHand = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            rHand.name = "Mogul_Right_Hand";
+            rHand.transform.SetParent(avatarHolder.transform, false);
+            rHand.transform.localPosition = new Vector3(0.16f, 0.02f, 0.10f);
+            rHand.transform.localScale = new Vector3(0.045f, 0.035f, 0.055f);
+            Destroy(rHand.GetComponent<Collider>());
+            rHand.GetComponent<Renderer>().material = goldLapelMat;
+            rivalRightHandTransform = rHand.transform;
+        }
+
+        GameObject bubbleCanvas = new GameObject("Mogul_Speech_Bubble");
+        bubbleCanvas.transform.SetParent(avatarHolder.transform, false);
+        bubbleCanvas.transform.localPosition = new Vector3(0f, 0.29f, 0f);
+        bubbleCanvas.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        bubbleCanvas.transform.localScale = Vector3.one * 0.0005f;
+
+        Canvas c = bubbleCanvas.AddComponent<Canvas>();
+        c.renderMode = RenderMode.WorldSpace;
+        bubbleCanvas.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 110f);
+
+        rivalSpeechBubbleTMP = CreateUGUIText(bubbleCanvas.transform, "BubbleText", Vector2.zero, 30, new Color(1f, 0.90f, 0.45f));
+        rivalSpeechBubbleTMP.text = "MOGUL AI: \"Let's see what you've got!\"";
+    }
+
+    void SetRivalReaction(AvatarMood mood, string speechLine, float duration = 3.0f)
+    {
+        currentRivalMood = mood;
+        moodResetTimer = duration;
+        if (rivalSpeechBubbleTMP != null)
+        {
+            rivalSpeechBubbleTMP.text = $"MOGUL AI: \"{speechLine}\"";
+        }
+
+        if (rivalVisorRenderer != null)
+        {
+            Color visorCol = new Color(0.15f, 0.88f, 1f);
+            if (mood == AvatarMood.HappyCheer) visorCol = new Color(0.20f, 1f, 0.45f);
+            else if (mood == AvatarMood.AngrySlam) visorCol = new Color(1f, 0.18f, 0.20f);
+            else if (mood == AvatarMood.Thinking) visorCol = new Color(1f, 0.84f, 0.20f);
+            rivalVisorRenderer.material = CreateColoredMaterial(visorCol, 0.95f);
+        }
+    }
+
+    void AnimateRivalMogulAvatar()
+    {
+        if (rivalAvatarRoot == null) return;
+
+        if (moodResetTimer > 0f)
+        {
+            moodResetTimer -= Time.deltaTime;
+            if (moodResetTimer <= 0f)
+            {
+                currentRivalMood = AvatarMood.Neutral;
+                if (rivalVisorRenderer != null)
+                    rivalVisorRenderer.material = CreateColoredMaterial(new Color(0.15f, 0.88f, 1f), 0.95f);
+            }
+        }
+
+        float t = Time.time;
+        rivalAvatarRoot.localPosition = new Vector3(0f, 0.14f + Mathf.Sin(t * 2.2f) * 0.008f, (boardSize * 0.5f) + 0.22f);
+
+        if (rivalHeadTransform != null && rivalLeftHandTransform != null && rivalRightHandTransform != null)
+        {
+            switch (currentRivalMood)
+            {
+                case AvatarMood.HappyCheer:
+                    rivalHeadTransform.localRotation = Quaternion.Euler(Mathf.Sin(t * 12f) * 10f, 0f, 0f);
+                    rivalLeftHandTransform.localPosition = new Vector3(-0.16f, 0.12f + Mathf.Sin(t * 14f) * 0.045f, 0.10f);
+                    rivalRightHandTransform.localPosition = new Vector3(0.16f, 0.12f + Mathf.Cos(t * 14f) * 0.045f, 0.10f);
+                    break;
+
+                case AvatarMood.AngrySlam:
+                    rivalHeadTransform.localRotation = Quaternion.Euler(8f, Mathf.Sin(t * 22f) * 18f, 0f);
+                    float slamY = 0.01f + Mathf.Abs(Mathf.Sin(t * 16f)) * 0.06f;
+                    rivalLeftHandTransform.localPosition = new Vector3(-0.15f, slamY, 0.14f);
+                    rivalRightHandTransform.localPosition = new Vector3(0.15f, slamY, 0.14f);
+                    break;
+
+                default:
+                    rivalHeadTransform.localRotation = Quaternion.Euler(Mathf.Sin(t * 1.5f) * 4f, Mathf.Cos(t * 1.1f) * 8f, 0f);
+                    rivalLeftHandTransform.localPosition = new Vector3(-0.16f, 0.02f + Mathf.Sin(t * 2.5f) * 0.01f, 0.10f);
+                    rivalRightHandTransform.localPosition = new Vector3(0.16f, 0.02f + Mathf.Cos(t * 2.5f) * 0.01f, 0.10f);
+                    break;
+            }
+        }
+    }
+
+    public void TryExecuteHostileTakeover()
+    {
+        BoardTile currentTile = board[playerPos[0]];
+        BoardTile targetTile = null;
+
+        if (currentTile.owner == 1 && (currentTile.type == TileType.Property || currentTile.type == TileType.Railroad || currentTile.type == TileType.Utility))
+        {
+            targetTile = currentTile;
+        }
+        else
+        {
+            for (int i = 0; i < 40; i++)
+            {
+                if (board[i].owner == 1 && board[i].colorGroup >= 0 && PlayerOwnsAnyInGroup(0, board[i].colorGroup))
+                {
+                    targetTile = board[i];
+                    break;
+                }
+            }
+            if (targetTile == null)
+            {
+                for (int i = 0; i < 40; i++)
+                {
+                    if (board[i].owner == 1)
+                    {
+                        targetTile = board[i];
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (targetTile == null)
+        {
+            RefreshDashboard("NO RIVAL PROPERTY FOR TAKEOVER", "Mogul AI doesn't own any properties yet! Roll and play on.");
+            return;
+        }
+
+        int buyoutPrice = (targetTile.price * 2) + (targetTile.buildingLevel * targetTile.buildCost);
+        if (playerCash[0] < buyoutPrice)
+        {
+            RefreshDashboard($"HOSTILE TAKEOVER NEEDS ${buyoutPrice}", $"You need ${buyoutPrice} to force Mogul AI to sell {targetTile.name}!");
+            SetRivalReaction(AvatarMood.HappyCheer, $"Haha! You can't afford to buy out {targetTile.name}!");
+            return;
+        }
+
+        playerCash[0] -= buyoutPrice;
+        playerCash[1] += buyoutPrice;
+        targetTile.owner = 0;
+
+        PlaySFX(cashRegisterSound, procCashClip, 1.3f);
+        PlaySFX(buildUpgradeSound, procBuildClip, 1.15f);
+        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[1].position, 10));
+
+        Color playerColor = new Color(0.18f, 0.85f, 0.45f);
+        if (targetTile.tileRenderer != null)
+        {
+            targetTile.tileRenderer.material = CreateColoredMaterial(playerColor, 0.85f);
+        }
+        if (targetTile.ownershipBadge != null)
+        {
+            targetTile.ownershipBadge.GetComponent<Renderer>().material = CreateColoredMaterial(playerColor, 0.95f);
+        }
+
+        RebuildMonopolySynergyBeams();
+        SetRivalReaction(AvatarMood.AngrySlam, $"NO! You seized {targetTile.name} in a Hostile Takeover!");
+        ShowSpecialEventCard("HOSTILE TAKEOVER!", $"You paid ${buyoutPrice} to seize\n<b>{targetTile.name}</b>\nfrom Mogul AI!", new Color(0.95f, 0.74f, 0.15f));
+        RefreshDashboard($"HOSTILE TAKEOVER: SEIZED {targetTile.name}!", $"Paid ${buyoutPrice} buyout to Mogul AI! Property is now YOURS!");
+    }
+
+    bool PlayerOwnsAnyInGroup(int playerIdx, int colorGroup)
+    {
+        if (colorGroup < 0) return false;
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i].colorGroup == colorGroup && board[i].owner == playerIdx) return true;
+        }
+        return false;
+    }
+
     IEnumerator SpawnFlyingCoinsStream(Vector3 startWorldPos, Vector3 endWorldPos, int coinCount = 8)
     {
         Material goldCoinMat = CreateColoredMaterial(new Color(1f, 0.84f, 0.20f), 0.95f, 0.85f);
@@ -449,7 +998,6 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    // --- MONOPOLY SYNERGY LASER CONDUITS (Links Complete Color Sets Together!) ---
     void RebuildMonopolySynergyBeams()
     {
         if (monopolyBeamsContainer == null) return;
@@ -495,104 +1043,6 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void UpdateIndexTipPointersAndPinches(out bool rightPinchTriggered, out bool leftPinchTriggered)
-    {
-        rightPinchTriggered = false;
-        leftPinchTriggered = false;
-
-        bool isRightPinching = false;
-        bool isLeftPinching = false;
-
-        try
-        {
-            OVRPlugin.HandState leftState = new OVRPlugin.HandState();
-            OVRPlugin.HandState rightState = new OVRPlugin.HandState();
-            Transform refSpace = trackingSpaceTransform != null ? trackingSpaceTransform : transform;
-
-            if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandRight, ref rightState) &&
-                (rightState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
-            {
-                if (rightHandPointer != null)
-                {
-                    Vector3 wristLocal = new Vector3(rightState.RootPose.Position.x, rightState.RootPose.Position.y, -rightState.RootPose.Position.z);
-                    Quaternion wristRot = new Quaternion(-rightState.RootPose.Orientation.x, -rightState.RootPose.Orientation.y, rightState.RootPose.Orientation.z, rightState.RootPose.Orientation.w);
-                    Vector3 indexTipOffsetLocal = wristRot * new Vector3(-0.155f, 0.02f, 0.035f);
-                    rightHandPointer.position = refSpace.TransformPoint(wristLocal + indexTipOffsetLocal);
-                }
-
-                bool indexPinch = (rightState.Pinches & OVRPlugin.HandFingerPinch.Index) != 0;
-                float strength = (rightState.PinchStrength != null && rightState.PinchStrength.Length > 1) ? rightState.PinchStrength[1] : 0f;
-                isRightPinching = indexPinch || strength > 0.65f;
-            }
-            else if (rightHandAnchor != null && rightHandPointer != null)
-            {
-                rightHandPointer.position = rightHandAnchor.position + rightHandAnchor.forward * 0.15f;
-            }
-
-            if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandLeft, ref leftState) &&
-                (leftState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
-            {
-                if (leftHandPointer != null)
-                {
-                    Vector3 wristLocal = new Vector3(leftState.RootPose.Position.x, leftState.RootPose.Position.y, -leftState.RootPose.Position.z);
-                    Quaternion wristRot = new Quaternion(-leftState.RootPose.Orientation.x, -leftState.RootPose.Orientation.y, leftState.RootPose.Orientation.z, leftState.RootPose.Orientation.w);
-                    Vector3 indexTipOffsetLocal = wristRot * new Vector3(0.155f, -0.02f, 0.035f);
-                    leftHandPointer.position = refSpace.TransformPoint(wristLocal + indexTipOffsetLocal);
-                }
-
-                bool indexPinch = (leftState.Pinches & OVRPlugin.HandFingerPinch.Index) != 0;
-                float strength = (leftState.PinchStrength != null && leftState.PinchStrength.Length > 1) ? leftState.PinchStrength[1] : 0f;
-                isLeftPinching = indexPinch || strength > 0.65f;
-            }
-            else if (leftHandAnchor != null && leftHandPointer != null)
-            {
-                leftHandPointer.position = leftHandAnchor.position + leftHandAnchor.forward * 0.15f;
-            }
-        }
-        catch { }
-
-        isRightPinching |= OVRInput.GetDown(OVRInput.Button.One);
-        isLeftPinching |= OVRInput.GetDown(OVRInput.Button.Two);
-
-        if (!isInPenthouseVR && isRightPinching && isLeftPinching && leftHandPointer != null && rightHandPointer != null)
-        {
-            Vector3 midPoint = (leftHandPointer.position + rightHandPointer.position) * 0.5f;
-            float handDist = Vector3.Distance(leftHandPointer.position, rightHandPointer.position);
-
-            if (!isTwoHandManipulating)
-            {
-                isTwoHandManipulating = true;
-                initialTwoHandDistance = Mathf.Max(0.08f, handDist);
-                initialScaleOnGrab = currentBoardScale;
-                initialGrabMidpoint = midPoint;
-                initialBoardPosOnGrab = transform.position;
-            }
-            else
-            {
-                float scaleFactor = handDist / initialTwoHandDistance;
-                currentBoardScale = Mathf.Clamp(initialScaleOnGrab * scaleFactor, 0.40f, 1.65f);
-                transform.localScale = Vector3.one * currentBoardScale;
-
-                transform.position = initialBoardPosOnGrab + (midPoint - initialGrabMidpoint);
-                savedBoardPosition = transform.position;
-            }
-
-            wasRightPinching = true;
-            wasLeftPinching = true;
-            return;
-        }
-        else
-        {
-            isTwoHandManipulating = false;
-        }
-
-        rightPinchTriggered = isRightPinching && !wasRightPinching;
-        leftPinchTriggered = isLeftPinching && !wasLeftPinching;
-        wasRightPinching = isRightPinching;
-        wasLeftPinching = isLeftPinching;
-    }
-
-    // --- FLOATING VR CONTROLS (EXIT VR + TELEPORT TO ROOFTOP PENTHOUSE!) ---
     void CreateFloatingVRControls()
     {
         vrExitFloatingButton = CreateFloatingVRBtn("VR_Exit_Btn", "EXIT VR VIEW\n(Right Pinch)", new Color(0.92f, 0.20f, 0.25f));
@@ -626,32 +1076,33 @@ public class TycoonBoardManager : MonoBehaviour
 
     void KeepVRControlsInFrontOfPlayer()
     {
-        if (centerEyeAnchor == null) return;
-        Vector3 flatFwd = new Vector3(centerEyeAnchor.forward.x, 0f, centerEyeAnchor.forward.z).normalized;
+        Transform eye = Camera.main != null ? Camera.main.transform : null;
+        if (eye == null) return;
+        Vector3 flatFwd = new Vector3(eye.forward.x, 0f, eye.forward.z).normalized;
         if (flatFwd.sqrMagnitude < 0.01f) flatFwd = Vector3.forward;
         Vector3 rightVec = Vector3.Cross(Vector3.up, flatFwd).normalized;
 
         if (vrExitFloatingButton != null)
         {
-            vrExitFloatingButton.transform.position = centerEyeAnchor.position + (flatFwd * 0.55f) - (rightVec * 0.15f) + new Vector3(0f, -0.26f, 0f);
+            vrExitFloatingButton.transform.position = eye.position + (flatFwd * 0.55f) - (rightVec * 0.15f) + new Vector3(0f, -0.26f, 0f);
             vrExitFloatingButton.transform.rotation = Quaternion.LookRotation(flatFwd);
         }
 
         if (vrRooftopTeleportButton != null)
         {
-            vrRooftopTeleportButton.transform.position = centerEyeAnchor.position + (flatFwd * 0.55f) + (rightVec * 0.15f) + new Vector3(0f, -0.26f, 0f);
+            vrRooftopTeleportButton.transform.position = eye.position + (flatFwd * 0.55f) + (rightVec * 0.15f) + new Vector3(0f, -0.26f, 0f);
             vrRooftopTeleportButton.transform.rotation = Quaternion.LookRotation(flatFwd);
         }
     }
 
     void ToggleRooftopVantagePoint()
     {
-        if (!isInPenthouseVR || centerEyeAnchor == null) return;
+        Transform eye = Camera.main != null ? Camera.main.transform : null;
+        if (!isInPenthouseVR || eye == null) return;
         isStandingOnRooftop = !isStandingOnRooftop;
 
         if (isStandingOnRooftop)
         {
-            // Find the player's tallest owned building (or Boardwalk Tile 39) and elevate the player to its rooftop terrace!
             BoardTile bestTile = board[39];
             int bestLvl = -1;
             for (int i = 0; i < 40; i++)
@@ -665,19 +1116,18 @@ public class TycoonBoardManager : MonoBehaviour
 
             Vector3 tileLocal = bestTile.tileTransform.localPosition;
             float rooftopHeightOffset = 2.8f + Mathf.Max(1, bestTile.buildingLevel) * 0.65f;
-            transform.position = centerEyeAnchor.position - (transform.rotation * (tileLocal * 14f)) - new Vector3(0f, rooftopHeightOffset, 0f);
+            transform.position = eye.position - (transform.rotation * (tileLocal * 14f)) - new Vector3(0f, rooftopHeightOffset, 0f);
             PlaySFX(buildUpgradeSound, procBuildClip, 1.25f);
             RefreshDashboard($"PENTHOUSE ROOFTOP: {bestTile.name}", "Look down over your skyline! Left Pinch for Plaza | Right Pinch to Exit.");
         }
         else
         {
-            transform.position = new Vector3(centerEyeAnchor.position.x, centerEyeAnchor.position.y - 1.65f, centerEyeAnchor.position.z);
+            transform.position = new Vector3(eye.position.x, eye.position.y - 1.65f, eye.position.z);
             PlaySFX(tokenMoveSound, procStepClip, 0.9f);
             RefreshDashboard("CENTRAL PARK STREET PLAZA", "Left Pinch for Rooftop Terrace | Right Pinch to Exit VR View.");
         }
     }
 
-    // --- LIVING INNER METROPOLIS COURTYARD + VIP HELICOPTER + FREE PARKING JACKPOT PILE ---
     void BuildLivingCenterCourtyard()
     {
         GameObject courtyardRoot = new GameObject("Inner_Metropolis_Courtyard");
@@ -693,7 +1143,7 @@ public class TycoonBoardManager : MonoBehaviour
         roadPlate.transform.SetParent(courtyardRoot.transform, false);
         roadPlate.transform.localPosition = new Vector3(0f, 0.021f, 0f);
         roadPlate.transform.localScale = new Vector3(0.76f, 0.004f, 0.76f);
-        Destroy(roadPlate.GetComponent<Collider>());
+        // Keep BoxCollider on roadPlate and parkIsland so PhysicalThrowDie bounces on the courtyard!
         roadPlate.GetComponent<Renderer>().material = asphaltMat;
 
         GameObject parkIsland = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -701,7 +1151,6 @@ public class TycoonBoardManager : MonoBehaviour
         parkIsland.transform.SetParent(courtyardRoot.transform, false);
         parkIsland.transform.localPosition = new Vector3(0f, 0.024f, 0f);
         parkIsland.transform.localScale = new Vector3(0.56f, 0.008f, 0.56f);
-        Destroy(parkIsland.GetComponent<Collider>());
         parkIsland.GetComponent<Renderer>().material = parkLawnMat;
 
         GameObject parkCurb = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -720,7 +1169,6 @@ public class TycoonBoardManager : MonoBehaviour
         Destroy(helipad.GetComponent<Collider>());
         helipad.GetComponent<Renderer>().material = helipadMat;
 
-        // Free Parking Jackpot Gold Bullion Pile near Tile 20 (Top-Left Corner)
         GameObject jackpotObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         jackpotObj.name = "Free_Parking_Gold_Vault";
         jackpotObj.transform.SetParent(courtyardRoot.transform, false);
@@ -730,12 +1178,12 @@ public class TycoonBoardManager : MonoBehaviour
         jackpotObj.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.85f, 0.20f), 0.95f, 0.9f);
         jackpotGoldPile = jackpotObj.transform;
 
-        // Spawn Orbiting VIP Helicopter / Drone above Central Park
         SpawnVIPHelicopter(courtyardRoot.transform);
 
         if (parkCenterpiecePrefab != null && parkCenterpiecePrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject cp = Instantiate(parkCenterpiecePrefab, courtyardRoot.transform);
+            StripRoguePhysicsFromImportedPrefab(cp);
             cp.transform.localPosition = new Vector3(0f, 0.03f, 0.14f);
             NormalizePrefabSize(cp, 0.085f);
         }
@@ -785,12 +1233,12 @@ public class TycoonBoardManager : MonoBehaviour
         if (vipHelicopterPrefab != null && vipHelicopterPrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject model = Instantiate(vipHelicopterPrefab, chopperHolder.transform);
+            StripRoguePhysicsFromImportedPrefab(model);
             model.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(model, 0.055f);
             return;
         }
 
-        // Sleek Gold-and-Obsidian Procedural Executive Chopper with Spinning Rotor!
         GameObject fuselage = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         fuselage.transform.SetParent(chopperHolder.transform, false);
         fuselage.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
@@ -824,6 +1272,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (parkTreePrefab != null && parkTreePrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject tree = Instantiate(parkTreePrefab, holder.transform);
+            StripRoguePhysicsFromImportedPrefab(tree);
             tree.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(tree, 0.065f);
             return;
@@ -853,6 +1302,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (streetlightPrefab != null && streetlightPrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject lamp = Instantiate(streetlightPrefab, holder.transform);
+            StripRoguePhysicsFromImportedPrefab(lamp);
             lamp.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(lamp, 0.06f);
         }
@@ -895,6 +1345,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (prefabToUse != null && prefabToUse.GetComponent<OVRCameraRig>() == null)
         {
             GameObject model = Instantiate(prefabToUse, holder.transform);
+            StripRoguePhysicsFromImportedPrefab(model);
             model.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(model, 0.032f);
         }
@@ -913,7 +1364,6 @@ public class TycoonBoardManager : MonoBehaviour
 
     void UpdateAmbientCourtyardTrafficAndChopper()
     {
-        // 1. Orbit VIP Helicopter above the city
         if (vipChopperTransform != null)
         {
             float angle = Time.time * 0.65f;
@@ -928,7 +1378,6 @@ public class TycoonBoardManager : MonoBehaviour
             chopperRotorTransform.Rotate(Vector3.up, 1080f * Time.deltaTime, Space.Self);
         }
 
-        // 2. Drive Ambient Cars around Inner Ring Road
         float roadHalf = 0.33f;
         for (int i = 0; i < ambientCars.Count; i++)
         {
@@ -1010,6 +1459,13 @@ public class TycoonBoardManager : MonoBehaviour
         deedHeaderRenderer.material = CreateColoredMaterial(GetOfficialColor(tile), 0.85f);
         deedTitleTMP.text = tile.name;
 
+        if (grabbableDeedCrystal != null && tile.owner == -1)
+        {
+            grabbableDeedCrystal.SetActive(true);
+            grabbableDeedCrystal.transform.localPosition = new Vector3(0.24f, 0.24f, -0.18f);
+            grabbableDeedCrystal.GetComponent<Renderer>().material = CreateColoredMaterial(GetOfficialColor(tile), 0.95f, 0.7f);
+        }
+
         if (tile.type == TileType.Property && tile.rentByLevel != null)
         {
             deedBodyTMP.text =
@@ -1048,6 +1504,7 @@ public class TycoonBoardManager : MonoBehaviour
     void HideDeedCard()
     {
         if (deedCardHolder != null) deedCardHolder.SetActive(false);
+        if (grabbableDeedCrystal != null) grabbableDeedCrystal.SetActive(false);
     }
 
     Quaternion GetFlatDieRotationForValue(int faceValue)
@@ -1063,7 +1520,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    Transform CreateExact3DPipsDie(string name, Vector3 localPos)
+    Transform CreateExact3DPipsDie(string name, Vector3 localPos, out PhysicalThrowDie physDieComp)
     {
         Material ivoryMat = CreateColoredMaterial(new Color(0.97f, 0.96f, 0.92f), 0.85f);
         Material pipMat = CreateColoredMaterial(new Color(0.06f, 0.06f, 0.08f), 0.9f);
@@ -1072,8 +1529,7 @@ public class TycoonBoardManager : MonoBehaviour
         dieRoot.name = name;
         dieRoot.transform.SetParent(transform, false);
         dieRoot.transform.localPosition = localPos;
-        dieRoot.transform.localScale = Vector3.one * 0.042f;
-        Destroy(dieRoot.GetComponent<Collider>());
+        dieRoot.transform.localScale = Vector3.one * 0.045f;
         dieRoot.GetComponent<Renderer>().material = ivoryMat;
 
         float o = 0.505f;
@@ -1106,6 +1562,11 @@ public class TycoonBoardManager : MonoBehaviour
         AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, -s));
         AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, s));
 
+        physDieComp = dieRoot.AddComponent<PhysicalThrowDie>();
+        physDieComp.OnDieBounceImpact += (impactStrength) =>
+        {
+            PlaySFX(diceRollSound, procDiceClip, Random.Range(0.92f, 1.18f));
+        };
         return dieRoot.transform;
     }
 
@@ -1122,8 +1583,8 @@ public class TycoonBoardManager : MonoBehaviour
 
     void Create3DDiceAndHighDashboard()
     {
-        die1Transform = CreateExact3DPipsDie("Die_1", new Vector3(-0.055f, 0.048f, -0.05f));
-        die2Transform = CreateExact3DPipsDie("Die_2", new Vector3(0.055f, 0.048f, -0.05f));
+        die1Transform = CreateExact3DPipsDie("Die_1", new Vector3(-0.055f, 0.052f, -0.05f), out physDie1);
+        die2Transform = CreateExact3DPipsDie("Die_2", new Vector3(0.055f, 0.052f, -0.05f), out physDie2);
         die1Transform.localRotation = GetFlatDieRotationForValue(6);
         die2Transform.localRotation = GetFlatDieRotationForValue(6);
 
@@ -1169,26 +1630,27 @@ public class TycoonBoardManager : MonoBehaviour
 
     void Create3DTouchButtonsOnTable()
     {
-        string[] labels = { "ROLL DICE", "BUY DEED", "PASS TURN", "BUILD (U)", "VR VIEW" };
+        string[] labels = { "ROLL DICE", "BUY DEED", "PASS TURN", "BUILD (U)", "TAKEOVER", "VR VIEW" };
         Color[] colors = {
             new Color(0.12f, 0.78f, 0.40f),
             new Color(0.95f, 0.74f, 0.15f),
             new Color(0.88f, 0.22f, 0.24f),
             new Color(0.18f, 0.62f, 0.96f),
+            new Color(0.95f, 0.45f, 0.10f),
             new Color(0.68f, 0.28f, 0.94f)
         };
 
-        float spacing = 0.20f;
-        float startX = -spacing * 2f;
+        float spacing = 0.168f;
+        float startX = -spacing * 2.5f;
         float frontZ = -(boardSize * 0.5f) - 0.045f;
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
         {
             buttonTransforms[i] = CreateSingle3DButton(
                 labels[i],
                 colors[i],
                 new Vector3(startX + i * spacing, 0.035f, frontZ),
-                new Vector3(0.17f, 0.032f, 0.072f)
+                new Vector3(0.15f, 0.032f, 0.072f)
             );
         }
 
@@ -1201,7 +1663,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         for (int j = 0; j < 3; j++)
         {
-            buttonTransforms[5 + j] = CreateSingle3DButton(
+            buttonTransforms[6 + j] = CreateSingle3DButton(
                 utilLabels[j],
                 utilColors[j],
                 new Vector3((j - 1) * 0.20f, 0.020f, frontZ - 0.075f),
@@ -1234,7 +1696,7 @@ public class TycoonBoardManager : MonoBehaviour
         txtGO.transform.SetParent(btnCanvasGO.transform, false);
         TextMeshProUGUI tmp = txtGO.AddComponent<TextMeshProUGUI>();
         tmp.text = label;
-        tmp.fontSize = 32;
+        tmp.fontSize = 30;
         tmp.color = Color.white;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.rectTransform.sizeDelta = new Vector2(260f, 80f);
@@ -1244,26 +1706,21 @@ public class TycoonBoardManager : MonoBehaviour
 
     int CheckPhysicalButtonTouch()
     {
-        if (Time.time - lastButtonTouchTime < 0.55f) return -1;
+        if (Time.time < lastButtonTouchTime) return -1;
+        if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
-        float touchRadius = 0.095f * currentBoardScale;
+        float touchRadius = 0.088f * currentBoardScale;
         for (int i = 0; i < buttonTransforms.Length; i++)
         {
             if (buttonTransforms[i] == null) continue;
             Vector3 btnPos = buttonTransforms[i].position;
 
-            float distRight = (rightHandPointer != null) ? Vector3.Distance(rightHandPointer.position, btnPos) : 99f;
-            float distLeft = (leftHandPointer != null) ? Vector3.Distance(leftHandPointer.position, btnPos) : 99f;
-
-            if (i == 0 && die1Transform != null)
-            {
-                distRight = Mathf.Min(distRight, Vector3.Distance(rightHandPointer.position, die1Transform.position));
-                distLeft = Mathf.Min(distLeft, Vector3.Distance(leftHandPointer.position, die1Transform.position));
-            }
+            float distRight = isRightHandTracked ? Vector3.Distance(rightHandWorldPos, btnPos) : 99f;
+            float distLeft = isLeftHandTracked ? Vector3.Distance(leftHandWorldPos, btnPos) : 99f;
 
             if (distRight < touchRadius || distLeft < touchRadius)
             {
-                lastButtonTouchTime = Time.time;
+                lastButtonTouchTime = Time.time + 0.60f;
                 StartCoroutine(AnimateButtonPress(buttonTransforms[i]));
                 return i;
             }
@@ -1395,8 +1852,6 @@ public class TycoonBoardManager : MonoBehaviour
 
     void Build40TileClockwiseTable()
     {
-        RecenterBoardInFrontOfPlayer();
-
         if (darkMarbleMaterial == null)
             darkMarbleMaterial = CreateColoredMaterial(new Color(0.06f, 0.07f, 0.09f), 0.9f);
 
@@ -1414,6 +1869,7 @@ public class TycoonBoardManager : MonoBehaviour
         goldRim.transform.SetParent(transform, false);
         goldRim.transform.localPosition = new Vector3(0, -0.005f, 0);
         goldRim.transform.localScale = new Vector3(boardSize + 0.04f, 0.03f, boardSize + 0.04f);
+        Destroy(goldRim.GetComponent<Collider>());
         goldRim.GetComponent<Renderer>().material = brushedGoldMaterial;
 
         int gridCount = 11;
@@ -1441,6 +1897,7 @@ public class TycoonBoardManager : MonoBehaviour
             float width = isCorner ? step * 0.92f : step * 0.80f;
             float depth = isCorner ? step * 0.92f : step * 0.96f;
             plot.transform.localScale = new Vector3(width, 0.014f, depth);
+            Destroy(plot.GetComponent<Collider>());
 
             Renderer plotRenderer = plot.GetComponent<Renderer>();
             plotRenderer.material = CreateColoredMaterial(new Color(0.82f, 0.65f, 0.26f), 0.78f, 0.5f);
@@ -1497,6 +1954,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (customPrefab != null && customPrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject model = Instantiate(customPrefab, holder.transform);
+            StripRoguePhysicsFromImportedPrefab(model);
             model.transform.localPosition = Vector3.zero;
             model.transform.localRotation = Quaternion.identity;
             NormalizePrefabSize(model, 0.048f);
@@ -1506,6 +1964,7 @@ public class TycoonBoardManager : MonoBehaviour
             GameObject cyl = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             cyl.transform.SetParent(holder.transform, false);
             cyl.transform.localScale = new Vector3(0.026f, 0.020f, 0.026f);
+            Destroy(cyl.GetComponent<Collider>());
             cyl.GetComponent<Renderer>().material = fallbackMat;
         }
         return holder.transform;
@@ -1547,60 +2006,47 @@ public class TycoonBoardManager : MonoBehaviour
         playerTokens[playerIdx].localRotation = GetClockwiseTravelRotation(tileIdx);
     }
 
-    IEnumerator ExecutePlayerTurn()
+    IEnumerator ExecutePhysicsDiceRollTurn(bool useImpulseToss)
     {
-        currentState = TurnState.Moving;
+        currentState = TurnState.DiceTumbling;
         HideDeedCard();
 
-        int d1 = Random.Range(1, 7);
-        int d2 = Random.Range(1, 7);
+        if (physDie1 != null && physDie2 != null)
+        {
+            if (useImpulseToss)
+            {
+                physDie1.TossWithPhysicsImpulse();
+                physDie2.TossWithPhysicsImpulse();
+            }
+            else
+            {
+                physDie1.EndHandGrabAndThrow(transform.position);
+                physDie2.EndHandGrabAndThrow(transform.position);
+            }
+
+            PlaySFX(diceRollSound, procDiceClip, 1.0f);
+            RefreshDashboard("3D PHYSICS DICE TUMBLING...", "Watching where the dice settle on Central Park!");
+
+            float waitElapsed = 0f;
+            while ((physDie1.isRolling || physDie2.isRolling) && waitElapsed < 2.6f)
+            {
+                waitElapsed += Time.deltaTime;
+                yield return null;
+            }
+            PlaySFX(diceRollSound, procDiceClip, 0.85f);
+        }
+
+        int d1 = physDie1 != null ? physDie1.ReadTopFaceFromOrientation() : Random.Range(1, 7);
+        int d2 = physDie2 != null ? physDie2.ReadTopFaceFromOrientation() : Random.Range(1, 7);
+
+        die1Transform.localPosition = new Vector3(-0.055f, 0.048f, -0.05f);
+        die2Transform.localPosition = new Vector3(0.055f, 0.048f, -0.05f);
+        die1Transform.localRotation = GetFlatDieRotationForValue(d1);
+        die2Transform.localRotation = GetFlatDieRotationForValue(d2);
+
         lastDiceTotal = d1 + d2;
         bool isDoubles = (d1 == d2);
-
-        Quaternion targetRot1 = GetFlatDieRotationForValue(d1);
-        Quaternion targetRot2 = GetFlatDieRotationForValue(d2);
-
-        float spinTime = 0.52f;
-        float t = 0f;
-        int clatterCount = 0;
-        while (t < spinTime)
-        {
-            t += Time.deltaTime;
-            float progress = Mathf.Clamp01(t / spinTime);
-            if (t > clatterCount * 0.12f)
-            {
-                clatterCount++;
-                PlaySFX(diceRollSound, procDiceClip, Random.Range(0.9f, 1.15f));
-            }
-
-            if (die1Transform != null && die2Transform != null)
-            {
-                float bounce = Mathf.Sin(progress * Mathf.PI) * 0.065f * Mathf.Abs(Mathf.Cos(t * 18f));
-                die1Transform.localPosition = new Vector3(-0.055f, 0.048f + bounce, -0.05f);
-                die2Transform.localPosition = new Vector3(0.055f, 0.048f + bounce, -0.05f);
-
-                if (progress < 0.72f)
-                {
-                    die1Transform.Rotate(new Vector3(540f, 720f, 360f) * Time.deltaTime);
-                    die2Transform.Rotate(new Vector3(720f, 360f, 540f) * Time.deltaTime);
-                }
-                else
-                {
-                    float settleT = (progress - 0.72f) / 0.28f;
-                    die1Transform.localRotation = Quaternion.Slerp(die1Transform.localRotation, targetRot1, settleT);
-                    die2Transform.localRotation = Quaternion.Slerp(die2Transform.localRotation, targetRot2, settleT);
-                }
-            }
-            yield return null;
-        }
-
-        if (die1Transform != null && die2Transform != null)
-        {
-            die1Transform.localPosition = new Vector3(-0.055f, 0.048f, -0.05f);
-            die2Transform.localPosition = new Vector3(0.055f, 0.048f, -0.05f);
-            die1Transform.localRotation = targetRot1;
-            die2Transform.localRotation = targetRot2;
-        }
+        currentState = TurnState.Moving;
 
         if (inJail[0])
         {
@@ -1627,6 +2073,7 @@ public class TycoonBoardManager : MonoBehaviour
         {
             consecutiveDoubles = 0;
             SendToJail(0);
+            SetRivalReaction(AvatarMood.HappyCheer, "Haha! Caught speeding 3 times—enjoy Jail!");
             RefreshDashboard("3X DOUBLES SPEEDING!", "Sent directly to JAIL!");
             yield return new WaitForSeconds(1.2f);
             StartCoroutine(EndPlayerTurn(false));
@@ -1697,9 +2144,10 @@ public class TycoonBoardManager : MonoBehaviour
                         if (playerCash[0] >= tile.price)
                         {
                             currentState = TurnState.BuyOrPassDecision;
+                            SetRivalReaction(AvatarMood.Thinking, $"Thinking about buying {tile.name}?");
                             RefreshDashboard(
                                 $"LANDED ON {tile.name} (${tile.price})",
-                                "Right Pinch (or Touch [BUY DEED]) to Buy | Left Pinch (or [PASS]) to Skip"
+                                "Right Pinch to Distance-Pull the 3D Deed Crystal (or touch [BUY DEED]) | Left Pinch to Pass"
                             );
                             yield break;
                         }
@@ -1724,16 +2172,22 @@ public class TycoonBoardManager : MonoBehaviour
                     playerCash[tile.owner] += rent;
                     PlaySFX(cashRegisterSound, procCashClip, 0.9f);
                     StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, playerTokens[tile.owner].position, 8));
+
+                    if (playerIdx == 0)
+                        SetRivalReaction(AvatarMood.HappyCheer, $"Pay up! Thanks for the ${rent} rent on {tile.name}!");
+                    else
+                        SetRivalReaction(AvatarMood.AngrySlam, $"Ugh! Paid you ${rent} rent on {tile.name}!");
+
                     RefreshDashboard(
                         $"{who} PAID ${rent} RENT ON {tile.name}!",
-                        $"Paid to {(tile.owner == 0 ? "YOU" : "MOGUL AI")}."
+                        $"Paid to {(tile.owner == 0 ? "YOU" : "MOGUL AI")}. (Touch [TAKEOVER] on your turn to buy out AI properties!)"
                     );
                     yield return new WaitForSeconds(1.1f);
                 }
                 else
                 {
                     ShowDeedCardForTile(tile);
-                    RefreshDashboard($"{who} ON OWN PROPERTY ({tile.name})", "Touch [BUILD (U)] (or Left Pinch) to upgrade buildings!");
+                    RefreshDashboard($"{who} ON OWN PROPERTY ({tile.name})", "Touch [BUILD (U)] to upgrade buildings!");
                     yield return new WaitForSeconds(0.8f);
                 }
                 break;
@@ -1754,12 +2208,14 @@ public class TycoonBoardManager : MonoBehaviour
                 {
                     int won = freeParkingJackpot;
                     playerCash[playerIdx] += won;
-                    freeParkingJackpot = 50; // Reset base pot
+                    freeParkingJackpot = 50;
                     PlaySFX(cashRegisterSound, procCashClip, 1.25f);
                     if (jackpotGoldPile != null)
                     {
                         StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[playerIdx].position, 12));
                     }
+                    if (playerIdx == 0) SetRivalReaction(AvatarMood.AngrySlam, $"You swept the ${won} Free Parking Jackpot?!");
+                    else SetRivalReaction(AvatarMood.HappyCheer, $"Jackpot! +${won} is all mine!");
                     RefreshDashboard($"{who} WON FREE PARKING JACKPOT!", $"Collected +${won} from the central gold vault!");
                 }
                 else
@@ -1883,8 +2339,19 @@ public class TycoonBoardManager : MonoBehaviour
             ConstructChronological3DBuilding(tile);
         }
 
-        // Check if this purchase completed a Color Monopoly and link the district with golden beams!
         RebuildMonopolySynergyBeams();
+
+        if (playerIdx == 0)
+        {
+            if (OwnsFullColorGroup(0, tile.colorGroup))
+                SetRivalReaction(AvatarMood.AngrySlam, $"Uh oh! You completed a Monopoly on {tile.name}!");
+            else
+                SetRivalReaction(AvatarMood.Neutral, $"Nice pickup on {tile.name}...");
+        }
+        else
+        {
+            SetRivalReaction(AvatarMood.HappyCheer, $"I just acquired {tile.name}!");
+        }
 
         RefreshDashboard(
             $"{(playerIdx == 0 ? "YOU" : "MOGUL AI")} BOUGHT {tile.name} (${tile.price})!",
@@ -1925,7 +2392,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         if (targetTile == null)
         {
-            RefreshDashboard("NO OWNED PROPERTY TO UPGRADE", "Buy a Property Deed first, then touch [BUILD (U)] (or Left Pinch).");
+            RefreshDashboard("NO OWNED PROPERTY TO UPGRADE", "Buy a Property Deed first, then touch [BUILD (U)].");
             return;
         }
 
@@ -1946,6 +2413,11 @@ public class TycoonBoardManager : MonoBehaviour
         string tierLabel = (targetTile.buildingLevel == 5)
             ? "LVL 5 SKYSCRAPER HOTEL"
             : $"HOUSE LEVEL {targetTile.buildingLevel} OF 4";
+
+        if (playerIdx == 0 && targetTile.buildingLevel == 5)
+        {
+            SetRivalReaction(AvatarMood.AngrySlam, $"A Skyscraper Hotel on {targetTile.name}?! Dangerous!");
+        }
 
         RefreshDashboard(
             $"BUILT {tierLabel} ON {targetTile.name}!",
@@ -1981,6 +2453,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (prefabToUse != null && prefabToUse.GetComponent<OVRCameraRig>() == null)
         {
             model = Instantiate(prefabToUse, holder.transform);
+            StripRoguePhysicsFromImportedPrefab(model);
             model.transform.localPosition = Vector3.zero;
             model.transform.localRotation = Quaternion.identity;
         }
@@ -1988,6 +2461,7 @@ public class TycoonBoardManager : MonoBehaviour
         {
             model = GameObject.CreatePrimitive(PrimitiveType.Cube);
             model.transform.SetParent(holder.transform, false);
+            Destroy(model.GetComponent<Collider>());
             model.GetComponent<Renderer>().material = CreateColoredMaterial(GetOfficialColor(tile), 0.85f);
         }
 
@@ -2055,7 +2529,6 @@ public class TycoonBoardManager : MonoBehaviour
         }
 
         int baseRent = tile.rentByLevel[Mathf.Clamp(tile.buildingLevel, 0, 5)];
-        // Double rent if owner holds the complete Color Group Monopoly!
         if (OwnsFullColorGroup(tile.owner, tile.colorGroup) && tile.buildingLevel <= 1)
         {
             return baseRent * 2;
@@ -2083,15 +2556,16 @@ public class TycoonBoardManager : MonoBehaviour
 
     IEnumerator EndPlayerTurn(bool playerRolledDoubles)
     {
-        // Check for Bankruptcy Victory / Defeat!
         if (playerCash[1] < 0)
         {
+            SetRivalReaction(AvatarMood.AngrySlam, "I'm bankrupt! You win this empire!");
             RefreshDashboard("VICTORY! MOGUL AI IS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire!");
             currentState = TurnState.WaitingForRoll;
             yield break;
         }
         if (playerCash[0] < 0)
         {
+            SetRivalReaction(AvatarMood.HappyCheer, "Look who's bankrupt! My empire reigns supreme!");
             RefreshDashboard("BANKRUPTCY! MOGUL AI WINS!", "Touch [ROLL DICE] to start a fresh comeback round!");
             playerCash[0] = 1500;
             playerCash[1] = 1500;
@@ -2100,14 +2574,14 @@ public class TycoonBoardManager : MonoBehaviour
         if (playerRolledDoubles && !inJail[0])
         {
             currentState = TurnState.WaitingForRoll;
-            RefreshDashboard("DOUBLES BONUS ROLL!", "Touch [ROLL DICE] (or Right Pinch) again!");
+            RefreshDashboard("DOUBLES BONUS ROLL!", "Pinch to Distance-Pull & Throw the 3D Dice again!");
             yield break;
         }
 
         currentState = TurnState.AITurn;
+        SetRivalReaction(AvatarMood.Thinking, "My turn! Let's roll...");
         yield return new WaitForSeconds(0.75f);
 
-        // Smart AI Mogul: If AI has extra cash (> $500), it automatically upgrades one of its owned properties!
         if (playerCash[1] > 500)
         {
             TryBuildChronologically(1);
@@ -2133,7 +2607,7 @@ public class TycoonBoardManager : MonoBehaviour
         yield return StartCoroutine(EvaluateTileLanding(1, false));
 
         currentState = TurnState.WaitingForRoll;
-        RefreshDashboard("YOUR TURN — ROLL OR UPGRADE", "Right Pinch (or Touch [ROLL]) to Roll | Pinch BOTH hands to Move/Resize board!");
+        RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
     }
 
     void RefreshDashboard(string eventHeadline, string promptLine)
@@ -2162,16 +2636,12 @@ public class TycoonBoardManager : MonoBehaviour
     {
         isInPenthouseVR = !isInPenthouseVR;
         isStandingOnRooftop = false;
-        FindXRAnchorsSafely();
-        Transform eye = centerEyeAnchor != null ? centerEyeAnchor : transform;
+        Transform eye = Camera.main != null ? Camera.main.transform : transform;
 
         if (isInPenthouseVR)
         {
-            savedBoardPosition = transform.position;
-            savedBoardRotation = transform.rotation;
-
             transform.localScale = Vector3.one * 14f;
-            transform.rotation = savedBoardRotation;
+            transform.rotation = lockedBoardRotation;
             transform.position = new Vector3(eye.position.x, eye.position.y - 1.65f, eye.position.z);
 
             if (passthroughLayer != null) passthroughLayer.textureOpacity = 0f;
@@ -2187,14 +2657,14 @@ public class TycoonBoardManager : MonoBehaviour
         else
         {
             transform.localScale = Vector3.one * currentBoardScale;
-            transform.position = savedBoardPosition;
-            transform.rotation = savedBoardRotation;
+            transform.position = lockedBoardPosition;
+            transform.rotation = lockedBoardRotation;
 
             if (passthroughLayer != null) passthroughLayer.textureOpacity = isMarketNightMode ? 0.22f : 1.0f;
             if (vrSkyDome != null) vrSkyDome.SetActive(false);
             if (vrExitFloatingButton != null) vrExitFloatingButton.SetActive(false);
             if (vrRooftopTeleportButton != null) vrRooftopTeleportButton.SetActive(false);
-            RefreshDashboard("RETURNED TO MR EXECUTIVE TABLE", "Touch [ROLL DICE] or Pinch BOTH hands to Move/Shrink/Grow the board!");
+            RefreshDashboard("RETURNED TO MR EXECUTIVE TABLE", "Pinch to Pull & Throw the 3D Dice or touch [ROLL DICE]!");
         }
     }
 
