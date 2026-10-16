@@ -155,15 +155,20 @@ public class TycoonBoardManager : MonoBehaviour
     private bool wasRightPinching = false;
     private bool wasLeftPinching = false;
 
+    // 1. In Awake(), keep a reference to [BuildingBlock] Cube before hiding it so we can clone its native DistanceHandGrab setup!
+    private GameObject buildingBlockGrabTemplate;
+
     void Awake()
     {
-        // Keep Meta's 'Locomotor' disabled so it NEVER drops the player camera into the abyss!
         GameObject locomotorObj = GameObject.Find("Locomotor");
         if (locomotorObj != null) locomotorObj.SetActive(false);
 
-        // Hide any sample white '[BuildingBlock] Cube' if Distance Grab spawned one
         GameObject sampleCube = GameObject.Find("[BuildingBlock] Cube");
-        if (sampleCube != null) sampleCube.SetActive(false);
+        if (sampleCube != null)
+        {
+            buildingBlockGrabTemplate = sampleCube;
+            sampleCube.SetActive(false);
+        }
 
         Rigidbody boardRb = GetComponent<Rigidbody>();
         if (boardRb != null) Destroy(boardRb);
@@ -1672,6 +1677,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
+// 2. Replace CreateSingle3DButton() and CheckPhysicalButtonTouch() with Collider-Based Native Fingertip Poking:
     Transform CreateSingle3DButton(string label, Color color, Vector3 localPos, Vector3 localScale)
     {
         GameObject btn = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1679,7 +1685,11 @@ public class TycoonBoardManager : MonoBehaviour
         btn.transform.SetParent(transform, false);
         btn.transform.localPosition = localPos;
         btn.transform.localScale = localScale;
-        Destroy(btn.GetComponent<Collider>());
+
+        // Keep BoxCollider as a Trigger so Meta's PokeInteractor fingertip collider intersects the exact 3D button box!
+        BoxCollider box = btn.GetComponent<BoxCollider>();
+        if (box != null) box.isTrigger = true;
+
         btn.GetComponent<Renderer>().material = CreateColoredMaterial(color, 0.85f);
 
         GameObject btnCanvasGO = new GameObject($"BtnLabel_{label}");
@@ -1709,24 +1719,26 @@ public class TycoonBoardManager : MonoBehaviour
         if (Time.time < lastButtonTouchTime) return -1;
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
-        float touchRadius = 0.088f * currentBoardScale;
         for (int i = 0; i < buttonTransforms.Length; i++)
         {
             if (buttonTransforms[i] == null) continue;
-            Vector3 btnPos = buttonTransforms[i].position;
+            Collider btnCol = buttonTransforms[i].GetComponent<Collider>();
+            if (btnCol == null) continue;
 
-            float distRight = isRightHandTracked ? Vector3.Distance(rightHandWorldPos, btnPos) : 99f;
-            float distLeft = isLeftHandTracked ? Vector3.Distance(leftHandWorldPos, btnPos) : 99f;
+            // Exact 3D BoxCollider surface poke check using Meta's PokeInteractor fingertip origin!
+            bool rightPoked = isRightHandTracked && Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
+            bool leftPoked = isLeftHandTracked && Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
 
-            if (distRight < touchRadius || distLeft < touchRadius)
+            if (rightPoked || leftPoked)
             {
-                lastButtonTouchTime = Time.time + 0.60f;
+                lastButtonTouchTime = Time.time + 0.50f;
                 StartCoroutine(AnimateButtonPress(buttonTransforms[i]));
                 return i;
             }
         }
         return -1;
     }
+
 
     IEnumerator AnimateButtonPress(Transform btn)
     {
@@ -2618,12 +2630,13 @@ public class TycoonBoardManager : MonoBehaviour
         dashboardPromptTMP.text = promptLine;
     }
 
+    // 3. Replace ToggleMarketAtmosphere() so streetlight intensity stays gentle (0.15f Night / 0.06f Day):
     public void ToggleMarketAtmosphere()
     {
         isMarketNightMode = !isMarketNightMode;
         foreach (Light l in cityNightLights)
         {
-            if (l != null) l.intensity = isMarketNightMode ? 2.2f : 0.6f;
+            if (l != null) l.intensity = isMarketNightMode ? 0.15f : 0.06f;
         }
         if (passthroughLayer != null)
         {
