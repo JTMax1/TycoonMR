@@ -77,10 +77,18 @@ public class TycoonBoardManager : MonoBehaviour
     private int freeParkingJackpot = 100;
     private Transform jackpotGoldPile;
 
-    private enum TurnState { WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AITurn }
+    private enum TurnState { WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
     private TurnState currentState = TurnState.WaitingForRoll;
     private int lastDiceTotal = 0;
     private int consecutiveDoubles = 0;
+
+    public enum MarketCycle { Standard, BullBoom, BearRecession, TechIPOSurge }
+    private MarketCycle currentMarketCycle = MarketCycle.Standard;
+    private int totalTurnsCompleted = 0;
+    private GameObject marketAuraRing;
+
+    private bool auctionPlayerBidFlag = false;
+    private bool auctionPlayerDropFlag = false;
 
     private Transform die1Transform;
     private Transform die2Transform;
@@ -111,8 +119,14 @@ public class TycoonBoardManager : MonoBehaviour
     private int selectedTileIndex = -1;
     private float lastTilePokeTime = 0f;
     private Transform mortgageButtonTransform;
+    private GameObject mortgageBtnCanvasGO;
     private TextMeshProUGUI mortgageBtnText;
     private Renderer mortgageBtnRenderer;
+
+    private Transform upgradeCardButtonTransform;
+    private GameObject upgradeBtnCanvasGO;
+    private TextMeshProUGUI upgradeBtnText;
+    private Renderer upgradeBtnRenderer;
 
     private GameObject deedCardHolder;
     private Renderer deedHeaderRenderer;
@@ -303,10 +317,17 @@ public class TycoonBoardManager : MonoBehaviour
 
         StartCoroutine(LockBoardInFrontOfPlayerOnStart());
 
-        RefreshDashboard(
-            "YOUR TURN — DISTANCE-GRAB & THROW DICE!",
-            "Point & Pinch with your hand to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
-        );
+        if (PlayerPrefs.GetInt("Tycoon_HasSave", 0) == 1)
+        {
+            LoadGameState();
+        }
+        else
+        {
+            RefreshDashboard(
+                "YOUR TURN — DISTANCE-GRAB & THROW DICE!",
+                "Point & Pinch with your hand to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
+            );
+        }
     }
 
     void OnDestroy()
@@ -393,6 +414,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (isInPenthouseVR) return;
         currentBoardScale = Mathf.Clamp(currentBoardScale + delta, 0.45f, 1.55f);
         transform.localScale = Vector3.one * currentBoardScale;
+        SaveGameState();
         PlaySFX(buildUpgradeSound, procStepClip, delta > 0 ? 1.15f : 0.85f);
         RefreshDashboard($"BOARD SIZE: {(int)(currentBoardScale * 100)}%", "Touch [- SHRINK] / [+ GROW] or Pinch BOTH hands to move & resize!");
     }
@@ -637,7 +659,11 @@ public class TycoonBoardManager : MonoBehaviour
         }
         else
         {
-            isTwoHandManipulating = false;
+            if (isTwoHandManipulating)
+            {
+                isTwoHandManipulating = false;
+                SaveGameState();
+            }
         }
 
         rightPinchDown = isRightPinching && !wasRightPinching;
@@ -663,7 +689,10 @@ public class TycoonBoardManager : MonoBehaviour
         bool shrinkPressed = Keyboard.current != null && Keyboard.current.minusKey.wasPressedThisFrame;
         bool growPressed = Keyboard.current != null && Keyboard.current.equalsKey.wasPressedThisFrame;
         bool kPressed = Keyboard.current != null && Keyboard.current.kKey.wasPressedThisFrame;
+        bool nPressed = Keyboard.current != null && Keyboard.current.nKey.wasPressedThisFrame;
+        bool lPressed = Keyboard.current != null && Keyboard.current.lKey.wasPressedThisFrame;
 
+        if (nPressed || lPressed) ResetMatch();
         if (recenterPressed) RecenterBoardInFrontOfPlayer();
         if (shrinkPressed) AdjustBoardScale(-0.12f);
         if (growPressed) AdjustBoardScale(0.12f);
@@ -724,7 +753,7 @@ public class TycoonBoardManager : MonoBehaviour
         else if (touchedButton == 7) AdjustBoardScale(0.12f);
         else if (touchedButton == 8) RecenterBoardInFrontOfPlayer();
 
-        // Check contextual [MORTGAGE] button poke or K key
+        // Check contextual [MORTGAGE] and [+ BUILD] button pokes on Deed Card
         bool mortgagePoked = CheckMortgageButtonPoke();
         if (kPressed || mortgagePoked)
         {
@@ -738,8 +767,14 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
 
+        bool upgradeCardPoked = CheckUpgradeButtonPoke();
+        if (upgradeCardPoked)
+        {
+            TryBuildChronologically(0);
+        }
+
         // Only trigger Distance Grab / Hand Grab / Tile Poke if player didn't just poke a UI button!
-        if (touchedButton == -1 && !mortgagePoked)
+        if (touchedButton == -1 && !mortgagePoked && !upgradeCardPoked)
         {
             HandlePhysicalDiceGrabAndThrow(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
             HandlePhysicalDeedCrystalGrab(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
@@ -782,14 +817,38 @@ public class TycoonBoardManager : MonoBehaviour
             }
             else if (passPressed || leftPinchDown)
             {
-                HideDeedCard();
-                RefreshDashboard("PASSED ON DEED", "Passing turn to Rival Mogul...");
-                StartCoroutine(EndPlayerTurn(false));
+                BoardTile curTile = board[playerPos[0]];
+                if (curTile != null && curTile.owner == -1 && (curTile.type == TileType.Property || curTile.type == TileType.Railroad || curTile.type == TileType.Utility))
+                {
+                    StartCoroutine(RunPropertyAuctionCoroutine(curTile));
+                }
+                else
+                {
+                    HideDeedCard();
+                    RefreshDashboard("PASSED ON DEED", "Passing turn to Rival Mogul...");
+                    StartCoroutine(EndPlayerTurn(false));
+                }
             }
             else if (upgradePressed)
             {
                 TryBuildChronologically(0);
             }
+        }
+        else if (currentState == TurnState.AuctionInProgress)
+        {
+            if (buyPressed || spacePressed || rightPinchDown)
+            {
+                auctionPlayerBidFlag = true;
+            }
+            if (passPressed || leftPinchDown)
+            {
+                auctionPlayerDropFlag = true;
+            }
+        }
+
+        if (marketAuraRing != null && marketAuraRing.activeSelf)
+        {
+            marketAuraRing.transform.Rotate(Vector3.up, 25f * Time.deltaTime);
         }
 
         if (moodPressed) ToggleMarketAtmosphere();
@@ -1434,6 +1493,16 @@ public class TycoonBoardManager : MonoBehaviour
             NormalizePrefabSize(cp, 0.085f);
         }
 
+        GameObject auraRing = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        auraRing.name = "MarketAuraRing";
+        auraRing.transform.SetParent(courtyardRoot.transform, false);
+        auraRing.transform.localPosition = new Vector3(0f, 0.040f, 0f);
+        auraRing.transform.localScale = new Vector3(0.55f, 0.002f, 0.55f);
+        Destroy(auraRing.GetComponent<Collider>());
+        auraRing.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.82f, 0.15f), 0.95f, 0.9f);
+        marketAuraRing = auraRing;
+        marketAuraRing.SetActive(currentMarketCycle == MarketCycle.BullBoom);
+
         Vector3[] treeSpots = new Vector3[]
         {
             new Vector3(-0.22f, 0.028f, -0.22f),
@@ -1702,10 +1771,11 @@ public class TycoonBoardManager : MonoBehaviour
 
     Transform CreateMortgageButtonOnDeedCard(Transform parent)
     {
+        // 1. Mortgage / Unmortgage Button (Left bottom lip of deed card)
         GameObject btn = GameObject.CreatePrimitive(PrimitiveType.Cube);
         btn.name = "TouchButton_MORTGAGE";
         btn.transform.SetParent(parent, false);
-        btn.transform.localPosition = new Vector3(0f, -0.175f, -0.005f);
+        btn.transform.localPosition = new Vector3(-0.11f, -0.175f, -0.005f);
         btn.transform.localScale = new Vector3(0.18f, 0.038f, 0.014f);
 
         BoxCollider box = btn.GetComponent<BoxCollider>();
@@ -1714,26 +1784,65 @@ public class TycoonBoardManager : MonoBehaviour
         mortgageBtnRenderer = btn.GetComponent<Renderer>();
         mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.85f, 0.25f, 0.20f), 0.85f);
 
-        GameObject btnCanvasGO = new GameObject("BtnLabel_Mortgage");
-        btnCanvasGO.transform.SetParent(btn.transform, false);
-        btnCanvasGO.transform.localPosition = new Vector3(0f, 0f, -0.55f);
-        btnCanvasGO.transform.localRotation = Quaternion.identity;
-        btnCanvasGO.transform.localScale = new Vector3(0.0035f, 0.0035f, 0.0035f);
+        // Parent Canvas directly to parent (deedCardHolder) at Z = -0.015f to avoid non-uniform aspect distortion!
+        mortgageBtnCanvasGO = new GameObject("BtnLabel_Mortgage");
+        mortgageBtnCanvasGO.transform.SetParent(parent, false);
+        mortgageBtnCanvasGO.transform.localPosition = new Vector3(-0.11f, -0.175f, -0.015f);
+        mortgageBtnCanvasGO.transform.localRotation = Quaternion.identity;
+        mortgageBtnCanvasGO.transform.localScale = Vector3.one * 0.00065f;
 
-        Canvas bc = btnCanvasGO.AddComponent<Canvas>();
+        Canvas bc = mortgageBtnCanvasGO.AddComponent<Canvas>();
         bc.renderMode = RenderMode.WorldSpace;
-        btnCanvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(260f, 80f);
+        mortgageBtnCanvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(250f, 55f);
 
         GameObject txtGO = new GameObject("Label");
-        txtGO.transform.SetParent(btnCanvasGO.transform, false);
+        txtGO.transform.SetParent(mortgageBtnCanvasGO.transform, false);
         mortgageBtnText = txtGO.AddComponent<TextMeshProUGUI>();
         mortgageBtnText.text = "[MORTGAGE (K)]";
-        mortgageBtnText.fontSize = 24;
+        mortgageBtnText.fontSize = 22;
         mortgageBtnText.color = Color.white;
         mortgageBtnText.alignment = TextAlignmentOptions.Center;
-        mortgageBtnText.rectTransform.sizeDelta = new Vector2(260f, 80f);
+        mortgageBtnText.rectTransform.sizeDelta = new Vector2(250f, 55f);
 
         btn.SetActive(false);
+        mortgageBtnCanvasGO.SetActive(false);
+
+        // 2. Targeted Upgrade Button [+ BUILD ($Cost)] (Right bottom lip of deed card)
+        GameObject btnUp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        btnUp.name = "TouchButton_UPGRADE_DEED";
+        btnUp.transform.SetParent(parent, false);
+        btnUp.transform.localPosition = new Vector3(0.11f, -0.175f, -0.005f);
+        btnUp.transform.localScale = new Vector3(0.18f, 0.038f, 0.014f);
+
+        BoxCollider boxUp = btnUp.GetComponent<BoxCollider>();
+        if (boxUp != null) boxUp.isTrigger = true;
+
+        upgradeBtnRenderer = btnUp.GetComponent<Renderer>();
+        upgradeBtnRenderer.material = CreateColoredMaterial(new Color(0.18f, 0.65f, 0.35f), 0.85f);
+
+        upgradeBtnCanvasGO = new GameObject("BtnLabel_UpgradeDeed");
+        upgradeBtnCanvasGO.transform.SetParent(parent, false);
+        upgradeBtnCanvasGO.transform.localPosition = new Vector3(0.11f, -0.175f, -0.015f);
+        upgradeBtnCanvasGO.transform.localRotation = Quaternion.identity;
+        upgradeBtnCanvasGO.transform.localScale = Vector3.one * 0.00065f;
+
+        Canvas bcUp = upgradeBtnCanvasGO.AddComponent<Canvas>();
+        bcUp.renderMode = RenderMode.WorldSpace;
+        upgradeBtnCanvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(250f, 55f);
+
+        GameObject txtUpGO = new GameObject("Label");
+        txtUpGO.transform.SetParent(upgradeBtnCanvasGO.transform, false);
+        upgradeBtnText = txtUpGO.AddComponent<TextMeshProUGUI>();
+        upgradeBtnText.text = "[+ BUILD (U)]";
+        upgradeBtnText.fontSize = 22;
+        upgradeBtnText.color = Color.white;
+        upgradeBtnText.alignment = TextAlignmentOptions.Center;
+        upgradeBtnText.rectTransform.sizeDelta = new Vector2(250f, 55f);
+
+        btnUp.SetActive(false);
+        upgradeBtnCanvasGO.SetActive(false);
+        upgradeCardButtonTransform = btnUp.transform;
+
         return btn.transform;
     }
 
@@ -1753,6 +1862,27 @@ public class TycoonBoardManager : MonoBehaviour
         {
             lastButtonTouchTime = Time.time + 0.50f;
             StartCoroutine(AnimateButtonPress(mortgageButtonTransform));
+            return true;
+        }
+        return false;
+    }
+
+    bool CheckUpgradeButtonPoke()
+    {
+        if (upgradeCardButtonTransform == null || !upgradeCardButtonTransform.gameObject.activeInHierarchy) return false;
+        if (Time.time < lastButtonTouchTime) return false;
+        if (!isRightHandTracked && !isLeftHandTracked) return false;
+
+        Collider col = upgradeCardButtonTransform.GetComponent<Collider>();
+        if (col == null) return false;
+
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+
+        if (rightPoked || leftPoked)
+        {
+            lastButtonTouchTime = Time.time + 0.50f;
+            StartCoroutine(AnimateButtonPress(upgradeCardButtonTransform));
             return true;
         }
         return false;
@@ -1836,6 +1966,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         ShowDeedCardForTile(tile);
         UpdateLiveHUDStats();
+        SaveGameState();
     }
 
     void ShowDeedCardForTile(BoardTile tile)
@@ -1892,6 +2023,8 @@ public class TycoonBoardManager : MonoBehaviour
             if (tile.owner == 0)
             {
                 mortgageButtonTransform.gameObject.SetActive(true);
+                if (mortgageBtnCanvasGO != null) mortgageBtnCanvasGO.SetActive(true);
+
                 if (tile.isMortgaged)
                 {
                     int unmortgageCost = (int)(tile.price * 0.55f);
@@ -1913,10 +2046,29 @@ public class TycoonBoardManager : MonoBehaviour
                         mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.85f, 0.25f, 0.20f), 0.85f);
                     }
                 }
+
+                if (upgradeCardButtonTransform != null)
+                {
+                    if (tile.type == TileType.Property && !tile.isMortgaged && tile.buildingLevel < 5)
+                    {
+                        upgradeCardButtonTransform.gameObject.SetActive(true);
+                        if (upgradeBtnCanvasGO != null) upgradeBtnCanvasGO.SetActive(true);
+                        int actualCost = (currentMarketCycle == MarketCycle.BearRecession) ? (int)(tile.buildCost * 0.7f) : tile.buildCost;
+                        upgradeBtnText.text = $"[+ BUILD (${actualCost})]";
+                    }
+                    else
+                    {
+                        upgradeCardButtonTransform.gameObject.SetActive(false);
+                        if (upgradeBtnCanvasGO != null) upgradeBtnCanvasGO.SetActive(false);
+                    }
+                }
             }
             else
             {
                 mortgageButtonTransform.gameObject.SetActive(false);
+                if (mortgageBtnCanvasGO != null) mortgageBtnCanvasGO.SetActive(false);
+                if (upgradeCardButtonTransform != null) upgradeCardButtonTransform.gameObject.SetActive(false);
+                if (upgradeBtnCanvasGO != null) upgradeBtnCanvasGO.SetActive(false);
             }
         }
     }
@@ -1929,6 +2081,9 @@ public class TycoonBoardManager : MonoBehaviour
         deedTitleTMP.text = headerTitle;
         deedBodyTMP.text = $"<b>EXECUTIVE DIRECTIVE</b>\n\n{cardDescription}";
         if (mortgageButtonTransform != null) mortgageButtonTransform.gameObject.SetActive(false);
+        if (mortgageBtnCanvasGO != null) mortgageBtnCanvasGO.SetActive(false);
+        if (upgradeCardButtonTransform != null) upgradeCardButtonTransform.gameObject.SetActive(false);
+        if (upgradeBtnCanvasGO != null) upgradeBtnCanvasGO.SetActive(false);
     }
 
     void HideDeedCard()
@@ -1936,6 +2091,9 @@ public class TycoonBoardManager : MonoBehaviour
         if (deedCardHolder != null) deedCardHolder.SetActive(false);
         if (grabbableDeedCrystal != null) grabbableDeedCrystal.SetActive(false);
         if (mortgageButtonTransform != null) mortgageButtonTransform.gameObject.SetActive(false);
+        if (mortgageBtnCanvasGO != null) mortgageBtnCanvasGO.SetActive(false);
+        if (upgradeCardButtonTransform != null) upgradeCardButtonTransform.gameObject.SetActive(false);
+        if (upgradeBtnCanvasGO != null) upgradeBtnCanvasGO.SetActive(false);
         selectedTileIndex = -1;
     }
 
@@ -2572,10 +2730,11 @@ public class TycoonBoardManager : MonoBehaviour
 
             if (nextTile == 0)
             {
-                playerCash[playerIdx] += 200;
+                int goSalary = (currentMarketCycle == MarketCycle.BullBoom) ? 300 : 200;
+                playerCash[playerIdx] += goSalary;
                 PlaySFX(cashRegisterSound, procCashClip, 1.1f);
                 StartCoroutine(SpawnFlyingCoinsStream(board[0].tileTransform.position, playerTokens[playerIdx].position, 6));
-                RefreshDashboard("PASSED GO! +$200 SALARY", $"{(playerIdx == 0 ? "You" : "Mogul AI")} collected $200.");
+                RefreshDashboard($"PASSED GO! +${goSalary} SALARY", $"{(playerIdx == 0 ? "You" : "Mogul AI")} collected ${goSalary}.");
             }
         }
     }
@@ -2681,6 +2840,12 @@ public class TycoonBoardManager : MonoBehaviour
 
             case TileType.Chance:
             case TileType.Chest:
+                if (currentMarketCycle == MarketCycle.TechIPOSurge)
+                {
+                    playerCash[playerIdx] += 50;
+                    PlaySFX(cashRegisterSound, procCashClip, 1.15f);
+                    RefreshDashboard($"{who} TECH DIVIDEND (+$50)", "Tech IPO Surge pays +$50 innovation dividend!");
+                }
                 yield return StartCoroutine(ExecuteAuthenticCardDraw(playerIdx, tile.type == TileType.Chance));
                 break;
 
@@ -2713,12 +2878,13 @@ public class TycoonBoardManager : MonoBehaviour
         switch (pick)
         {
             case 0:
-                playerCash[playerIdx] += 200;
+                int goSalary = (currentMarketCycle == MarketCycle.BullBoom) ? 300 : 200;
+                playerCash[playerIdx] += goSalary;
                 playerPos[playerIdx] = 0;
                 PositionTokenOnTile(playerIdx, 0);
                 PlaySFX(cashRegisterSound, procCashClip, 1.15f);
-                ShowSpecialEventCard(deckName, "ADVANCE TO GO!\nCollect $200 Dividend Salary immediately.", deckColor);
-                RefreshDashboard($"{who}: ADVANCE TO GO (+$200)!", "Teleported to GO and collected $200.");
+                ShowSpecialEventCard(deckName, $"ADVANCE TO GO!\nCollect ${goSalary} Dividend Salary immediately.", deckColor);
+                RefreshDashboard($"{who}: ADVANCE TO GO (+${goSalary})!", $"Teleported to GO and collected ${goSalary}.");
                 break;
 
             case 1:
@@ -2771,28 +2937,12 @@ public class TycoonBoardManager : MonoBehaviour
 
         StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, tile.tileTransform.position, 6));
 
-        Color tileTint = (playerIdx == 0) ? new Color(0.18f, 0.85f, 0.45f) : new Color(0.85f, 0.30f, 0.55f);
-        if (tile.tileRenderer != null)
-        {
-            tile.tileRenderer.material = CreateColoredMaterial(tileTint, 0.85f);
-        }
-
-        if (tile.ownershipBadge != null) Destroy(tile.ownershipBadge);
-        GameObject beacon = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        beacon.name = $"Owned_Beacon_P{playerIdx}";
-        beacon.transform.SetParent(tile.tileTransform, false);
-        beacon.transform.localPosition = new Vector3(0f, 1.8f, -0.35f);
-        beacon.transform.localScale = new Vector3(0.24f, 1.4f, 0.24f);
-        Destroy(beacon.GetComponent<Collider>());
-        beacon.GetComponent<Renderer>().material = CreateColoredMaterial(tileTint, 0.95f);
-        tile.ownershipBadge = beacon;
-
         if (tile.type == TileType.Property && tile.buildingLevel == 0)
         {
             tile.buildingLevel = 1;
-            ConstructChronological3DBuilding(tile);
         }
 
+        ApplyTileOwnershipVisuals(tile, playerIdx);
         RebuildMonopolySynergyBeams();
 
         if (playerIdx == 0)
@@ -2811,6 +2961,8 @@ public class TycoonBoardManager : MonoBehaviour
             $"{(playerIdx == 0 ? "YOU" : "MOGUL AI")} BOUGHT {tile.name} (${tile.price})!",
             "Tile claimed & Level 1 structure erected! Touch [BUILD (U)] on your turn to upgrade."
         );
+
+        SaveGameState();
 
         if (playerIdx == 0)
         {
@@ -2859,13 +3011,15 @@ public class TycoonBoardManager : MonoBehaviour
             return;
         }
 
-        if (playerCash[playerIdx] < targetTile.buildCost)
+        int actualBuildCost = (currentMarketCycle == MarketCycle.BearRecession) ? (int)(targetTile.buildCost * 0.7f) : targetTile.buildCost;
+
+        if (playerCash[playerIdx] < actualBuildCost)
         {
-            RefreshDashboard($"NEED ${targetTile.buildCost} TO BUILD", $"Insufficient cash to upgrade {targetTile.name}.");
+            RefreshDashboard($"NEED ${actualBuildCost} TO BUILD", $"Insufficient cash to upgrade {targetTile.name}.");
             return;
         }
 
-        playerCash[playerIdx] -= targetTile.buildCost;
+        playerCash[playerIdx] -= actualBuildCost;
         targetTile.buildingLevel++;
         buildCycleCursor = (targetTile.index + 1) % 40;
 
@@ -2884,7 +3038,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         RefreshDashboard(
             $"BUILT {tierLabel} ON {targetTile.name}!",
-            $"Paid ${targetTile.buildCost} | New Rent: ${targetTile.rentByLevel[targetTile.buildingLevel]}"
+            $"Paid ${actualBuildCost} | New Rent: ${CalculateAuthenticRent(targetTile, 7)}"
         );
 
         if (selectedTileIndex == targetTile.index)
@@ -2892,6 +3046,7 @@ public class TycoonBoardManager : MonoBehaviour
             ShowDeedCardForTile(targetTile);
         }
         UpdateLiveHUDStats();
+        SaveGameState();
     }
 
     GameObject GetPrefabForChronologicalLevel(int level)
@@ -2990,21 +3145,41 @@ public class TycoonBoardManager : MonoBehaviour
             int rrCount = 0;
             int[] rrIndices = { 5, 15, 25, 35 };
             foreach (int idx in rrIndices) if (board[idx].owner == tile.owner) rrCount++;
-            return 25 * (int)Mathf.Pow(2, Mathf.Max(0, rrCount - 1));
+            int baseRent = 25 * (int)Mathf.Pow(2, Mathf.Max(0, rrCount - 1));
+            if (currentMarketCycle == MarketCycle.TechIPOSurge)
+            {
+                baseRent = (int)(baseRent * 2.5f);
+            }
+            return baseRent;
         }
 
         if (tile.type == TileType.Utility)
         {
             bool ownsBoth = (board[12].owner == tile.owner && board[28].owner == tile.owner);
-            return diceRoll * (ownsBoth ? 10 : 4);
+            int baseRent = diceRoll * (ownsBoth ? 10 : 4);
+            if (currentMarketCycle == MarketCycle.TechIPOSurge)
+            {
+                baseRent = (int)(baseRent * 2.5f);
+            }
+            return baseRent;
         }
 
-        int baseRent = tile.rentByLevel[Mathf.Clamp(tile.buildingLevel, 0, 5)];
+        int propRent = tile.rentByLevel[Mathf.Clamp(tile.buildingLevel, 0, 5)];
         if (OwnsFullColorGroup(tile.owner, tile.colorGroup) && tile.buildingLevel <= 1)
         {
-            return baseRent * 2;
+            propRent = propRent * 2;
         }
-        return baseRent;
+
+        if (currentMarketCycle == MarketCycle.BullBoom)
+        {
+            propRent = (int)(propRent * 1.5f);
+        }
+        else if (currentMarketCycle == MarketCycle.BearRecession)
+        {
+            propRent = (int)(propRent * 0.7f);
+        }
+
+        return propRent;
     }
 
     bool OwnsFullColorGroup(int playerIdx, int colorGroup)
@@ -3077,8 +3252,374 @@ public class TycoonBoardManager : MonoBehaviour
         yield return StartCoroutine(MoveTokenSteps(1, lastDiceTotal));
         yield return StartCoroutine(EvaluateTileLanding(1, false));
 
+        totalTurnsCompleted++;
+        if (totalTurnsCompleted % 5 == 0)
+        {
+            ShiftMarketCycle();
+        }
+
+        SaveGameState();
+
         currentState = TurnState.WaitingForRoll;
         RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
+    }
+
+    void ShiftMarketCycle()
+    {
+        List<MarketCycle> options = new List<MarketCycle>();
+        foreach (MarketCycle mc in System.Enum.GetValues(typeof(MarketCycle)))
+        {
+            if (mc != currentMarketCycle) options.Add(mc);
+        }
+        currentMarketCycle = options[Random.Range(0, options.Count)];
+
+        if (marketAuraRing != null)
+        {
+            marketAuraRing.SetActive(currentMarketCycle == MarketCycle.BullBoom);
+        }
+
+        string cycleName = "";
+        string desc = "";
+        string aiLine = "";
+        switch (currentMarketCycle)
+        {
+            case MarketCycle.BullBoom:
+                cycleName = "BULL MARKET BOOM (+50% RENT)";
+                desc = "Macro-economy surges! All rents +50%, passing GO pays $300!";
+                aiLine = "A raging Bull Market! My portfolio is heading straight to the moon!";
+                break;
+            case MarketCycle.BearRecession:
+                cycleName = "BEAR MARKET CRUNCH (-30% BUILD)";
+                desc = "Economic crunch! Rents 0.7x, but building upgrades are 30% off!";
+                aiLine = "Recession hits... time to buy low and construct skyscrapers on discount!";
+                break;
+            case MarketCycle.TechIPOSurge:
+                cycleName = "TECH IPO SURGE (2.5x TRANSIT)";
+                desc = "Tech IPO boom! Railroads & Utilities pay 2.5x rent, +$50 tech dividends!";
+                aiLine = "Tech stocks surging! Our transit and utility monopolies dominate!";
+                break;
+            default:
+                cycleName = "STANDARD EQUILIBRIUM";
+                desc = "Market returns to steady equilibrium.";
+                aiLine = "Back to business fundamentals.";
+                break;
+        }
+
+        PlaySFX(cashRegisterSound, procCashClip, 1.25f);
+        SetRivalReaction(AvatarMood.Thinking, aiLine);
+        RefreshDashboard($"ECONOMIC SHIFT: {cycleName}", desc);
+        UpdateLiveHUDStats();
+    }
+
+    GameObject Create3DGavel(Transform parent)
+    {
+        GameObject gavelRoot = new GameObject("3D_Auction_Gavel");
+        gavelRoot.transform.SetParent(parent, false);
+        gavelRoot.transform.localPosition = new Vector3(0f, 0.28f, -0.02f);
+        gavelRoot.transform.localScale = Vector3.one * 0.75f;
+
+        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        head.name = "GavelHead";
+        head.transform.SetParent(gavelRoot.transform, false);
+        head.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        head.transform.localScale = new Vector3(0.045f, 0.055f, 0.045f);
+        Destroy(head.GetComponent<Collider>());
+        head.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.48f, 0.26f, 0.12f), 0.7f, 0.1f);
+
+        GameObject handle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        handle.name = "GavelHandle";
+        handle.transform.SetParent(gavelRoot.transform, false);
+        handle.transform.localPosition = new Vector3(0f, -0.055f, 0f);
+        handle.transform.localScale = new Vector3(0.014f, 0.06f, 0.014f);
+        Destroy(handle.GetComponent<Collider>());
+        handle.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.72f, 0.45f, 0.20f), 0.7f, 0.1f);
+
+        return gavelRoot;
+    }
+
+    IEnumerator AnimateGavelStrike(GameObject gavel)
+    {
+        if (gavel == null) yield break;
+        Vector3 origPos = gavel.transform.localPosition;
+        gavel.transform.localPosition = origPos + new Vector3(0f, -0.025f, 0f);
+        yield return new WaitForSeconds(0.12f);
+        if (gavel != null) gavel.transform.localPosition = origPos;
+    }
+
+    IEnumerator RunPropertyAuctionCoroutine(BoardTile tile)
+    {
+        currentState = TurnState.AuctionInProgress;
+        ShowDeedCardForTile(tile);
+
+        GameObject gavel = Create3DGavel(deedCardHolder != null ? deedCardHolder.transform : transform);
+
+        int currentBid = Mathf.Max(10, tile.price / 2);
+        int highestBidder = -1; // -1 = opening/no bidder yet, 0 = Player, 1 = AI
+        int aiMaxBid = tile.price + Random.Range(-30, 61);
+        aiMaxBid = Mathf.Min(aiMaxBid, playerCash[1]);
+
+        float timer = 6.0f;
+        float nextAiBidTime = Time.time + 1.1f;
+        bool playerDroppedOut = false;
+        bool aiDroppedOut = false;
+        auctionPlayerBidFlag = false;
+        auctionPlayerDropFlag = false;
+
+        PlaySFX(cashRegisterSound, procCashClip, 1.3f);
+        SetRivalReaction(AvatarMood.Thinking, $"An auction for {tile.name}! Opening bid: ${currentBid}. Let's bid!");
+
+        while (timer > 0f)
+        {
+            timer -= Time.deltaTime;
+
+            if (!playerDroppedOut)
+            {
+                if (auctionPlayerDropFlag)
+                {
+                    auctionPlayerDropFlag = false;
+                    playerDroppedOut = true;
+                    RefreshDashboard("AUCTION: YOU DROPPED OUT!", "You conceded the auction to Rival Mogul.");
+                    PlaySFX(tokenMoveSound, procStepClip, 0.8f);
+                    break;
+                }
+                if (auctionPlayerBidFlag)
+                {
+                    auctionPlayerBidFlag = false;
+                    int nextPlayerBid = (highestBidder == -1) ? currentBid : currentBid + 20;
+                    if (playerCash[0] >= nextPlayerBid)
+                    {
+                        currentBid = nextPlayerBid;
+                        highestBidder = 0;
+                        timer = Mathf.Max(timer, 2.5f);
+                        PlaySFX(cashRegisterSound, procCashClip, 1.2f);
+                        StartCoroutine(AnimateGavelStrike(gavel));
+                        SetRivalReaction(AvatarMood.Neutral, $"You raised to ${currentBid}?! Let me calculate...");
+                    }
+                    else
+                    {
+                        RefreshDashboard("INSUFFICIENT FUNDS TO BID", $"Need ${nextPlayerBid} to place bid.");
+                    }
+                }
+            }
+
+            if (!aiDroppedOut && Time.time >= nextAiBidTime && highestBidder != 1)
+            {
+                int nextAiBid = (highestBidder == -1) ? currentBid : currentBid + 20;
+                if (nextAiBid <= aiMaxBid && playerCash[1] >= nextAiBid)
+                {
+                    currentBid = nextAiBid;
+                    highestBidder = 1;
+                    nextAiBidTime = Time.time + 1.1f + Random.Range(0f, 0.4f);
+                    timer = Mathf.Max(timer, 2.5f);
+                    PlaySFX(diceRollSound, procDiceClip, 1.2f);
+                    StartCoroutine(AnimateGavelStrike(gavel));
+                    string taunt = (Random.value > 0.5f) ? $"I counter-bid ${currentBid}!" : $"Outbid! It's mine for ${currentBid}!";
+                    SetRivalReaction(AvatarMood.HappyCheer, taunt);
+                }
+                else
+                {
+                    aiDroppedOut = true;
+                    SetRivalReaction(AvatarMood.AngrySlam, $"Too steep for my spreadsheet! Take it at ${currentBid}.");
+                }
+            }
+
+            string bidderName = (highestBidder == 0) ? "YOU" : (highestBidder == 1 ? "MOGUL AI" : "NONE");
+            RefreshDashboard(
+                $"AUCTION: {tile.name.ToUpper()} — HIGH BID: ${currentBid} ({bidderName})",
+                $"Timer: {timer:F1}s | Right-Pinch/B: +$20 Raise | Left-Pinch/P: Drop Out"
+            );
+
+            if (deedBodyTMP != null)
+            {
+                deedBodyTMP.text =
+                    $"<b>PROPERTY AUCTION IN PROGRESS</b>\n\n" +
+                    $"Current Bid: <color=#FFD700><b>${currentBid}</b></color>\n" +
+                    $"High Bidder: <b>{bidderName}</b>\n" +
+                    $"Countdown: <b>{timer:F1}s</b>\n\n" +
+                    $"[BUY / B]: Raise +$20\n[PASS / P]: Drop Out";
+            }
+
+            if (gavel != null)
+            {
+                gavel.transform.Rotate(Vector3.up, 35f * Time.deltaTime);
+            }
+
+            yield return null;
+        }
+
+        if (gavel != null) Destroy(gavel);
+
+        if (highestBidder == 0)
+        {
+            playerCash[0] -= currentBid;
+            tile.owner = 0;
+            if (tile.type == TileType.Property && tile.buildingLevel == 0) tile.buildingLevel = 1;
+            ApplyTileOwnershipVisuals(tile, 0);
+            RebuildMonopolySynergyBeams();
+            PlaySFX(cashRegisterSound, procCashClip, 1.25f);
+            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, tile.tileTransform.position, 6));
+            RefreshDashboard($"AUCTION WON BY YOU FOR ${currentBid}!", $"Acquired {tile.name} with Level 1 Building at auction!");
+            SetRivalReaction(AvatarMood.AngrySlam, $"You sniped {tile.name} for ${currentBid}... well played.");
+        }
+        else if (highestBidder == 1)
+        {
+            playerCash[1] -= currentBid;
+            tile.owner = 1;
+            if (tile.type == TileType.Property && tile.buildingLevel == 0) tile.buildingLevel = 1;
+            ApplyTileOwnershipVisuals(tile, 1);
+            RebuildMonopolySynergyBeams();
+            PlaySFX(cashRegisterSound, procCashClip, 1.25f);
+            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[1].position, tile.tileTransform.position, 6));
+            RefreshDashboard($"AUCTION WON BY MOGUL AI FOR ${currentBid}!", $"Mogul AI claimed {tile.name} at auction!");
+            SetRivalReaction(AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
+        }
+        else
+        {
+            RefreshDashboard("AUCTION PASSED WITH NO BIDS", $"No bids placed for {tile.name}. Returned to bank.");
+        }
+
+        SaveGameState();
+        HideDeedCard();
+        yield return new WaitForSeconds(1.8f);
+        StartCoroutine(EndPlayerTurn(false));
+    }
+
+    void ApplyTileOwnershipVisuals(BoardTile tile, int playerIdx)
+    {
+        if (tile == null || tile.tileTransform == null) return;
+        Color tileTint = (playerIdx == 0) ? new Color(0.18f, 0.85f, 0.45f) : new Color(0.85f, 0.30f, 0.55f);
+        if (tile.isMortgaged)
+        {
+            tileTint = new Color(0.48f, 0.12f, 0.16f);
+        }
+
+        if (tile.tileRenderer != null)
+        {
+            tile.tileRenderer.material = CreateColoredMaterial(tileTint, 0.85f);
+        }
+
+        if (tile.ownershipBadge != null) Destroy(tile.ownershipBadge);
+        GameObject beacon = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        beacon.name = $"Owned_Beacon_P{playerIdx}";
+        beacon.transform.SetParent(tile.tileTransform, false);
+        beacon.transform.localPosition = new Vector3(0f, 1.8f, -0.35f);
+        beacon.transform.localScale = new Vector3(0.24f, 1.4f, 0.24f);
+        Destroy(beacon.GetComponent<Collider>());
+        beacon.GetComponent<Renderer>().material = CreateColoredMaterial(tileTint, 0.95f);
+        tile.ownershipBadge = beacon;
+
+        if (tile.buildingLevel > 0 && tile.type == TileType.Property && !tile.isMortgaged)
+        {
+            ConstructChronological3DBuilding(tile);
+        }
+    }
+
+    public void SaveGameState()
+    {
+        PlayerPrefs.SetInt("Tycoon_HasSave", 1);
+        PlayerPrefs.SetInt("Tycoon_Cash_P0", playerCash[0]);
+        PlayerPrefs.SetInt("Tycoon_Cash_P1", playerCash[1]);
+        PlayerPrefs.SetInt("Tycoon_Pos_P0", playerPos[0]);
+        PlayerPrefs.SetInt("Tycoon_Pos_P1", playerPos[1]);
+        PlayerPrefs.SetInt("Tycoon_Jackpot", freeParkingJackpot);
+        PlayerPrefs.SetInt("Tycoon_MarketCycle", (int)currentMarketCycle);
+        PlayerPrefs.SetInt("Tycoon_TotalTurns", totalTurnsCompleted);
+        PlayerPrefs.SetFloat("Tycoon_BoardScale", currentBoardScale);
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null)
+            {
+                PlayerPrefs.SetInt($"Tycoon_Tile_{i}_Owner", board[i].owner);
+                PlayerPrefs.SetInt($"Tycoon_Tile_{i}_Lvl", board[i].buildingLevel);
+                PlayerPrefs.SetInt($"Tycoon_Tile_{i}_Mortgaged", board[i].isMortgaged ? 1 : 0);
+            }
+        }
+        PlayerPrefs.Save();
+    }
+
+    public void LoadGameState()
+    {
+        if (PlayerPrefs.GetInt("Tycoon_HasSave", 0) != 1) return;
+
+        playerCash[0] = PlayerPrefs.GetInt("Tycoon_Cash_P0", 1500);
+        playerCash[1] = PlayerPrefs.GetInt("Tycoon_Cash_P1", 1500);
+        playerPos[0] = PlayerPrefs.GetInt("Tycoon_Pos_P0", 0);
+        playerPos[1] = PlayerPrefs.GetInt("Tycoon_Pos_P1", 0);
+        freeParkingJackpot = PlayerPrefs.GetInt("Tycoon_Jackpot", 100);
+        currentMarketCycle = (MarketCycle)PlayerPrefs.GetInt("Tycoon_MarketCycle", 0);
+        totalTurnsCompleted = PlayerPrefs.GetInt("Tycoon_TotalTurns", 0);
+        currentBoardScale = PlayerPrefs.GetFloat("Tycoon_BoardScale", 0.85f);
+        transform.localScale = Vector3.one * currentBoardScale;
+
+        PositionTokenOnTile(0, playerPos[0]);
+        PositionTokenOnTile(1, playerPos[1]);
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null)
+            {
+                board[i].owner = PlayerPrefs.GetInt($"Tycoon_Tile_{i}_Owner", -1);
+                board[i].buildingLevel = PlayerPrefs.GetInt($"Tycoon_Tile_{i}_Lvl", 0);
+                board[i].isMortgaged = (PlayerPrefs.GetInt($"Tycoon_Tile_{i}_Mortgaged", 0) == 1);
+
+                if (board[i].owner != -1)
+                {
+                    ApplyTileOwnershipVisuals(board[i], board[i].owner);
+                }
+            }
+        }
+
+        if (marketAuraRing != null)
+        {
+            marketAuraRing.SetActive(currentMarketCycle == MarketCycle.BullBoom);
+        }
+
+        RebuildMonopolySynergyBeams();
+        UpdateLiveHUDStats();
+        RefreshDashboard("SAVED EMPIRE LOADED", "Restored your metropolis, net worth, and active market cycle!");
+    }
+
+    public void ResetMatch()
+    {
+        PlayerPrefs.DeleteKey("Tycoon_HasSave");
+        PlayerPrefs.Save();
+
+        playerCash[0] = 1500;
+        playerCash[1] = 1500;
+        playerPos[0] = 0;
+        playerPos[1] = 0;
+        freeParkingJackpot = 100;
+        currentMarketCycle = MarketCycle.Standard;
+        totalTurnsCompleted = 0;
+
+        PositionTokenOnTile(0, 0);
+        PositionTokenOnTile(1, 0);
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null)
+            {
+                board[i].owner = -1;
+                board[i].buildingLevel = 0;
+                board[i].isMortgaged = false;
+                if (board[i].ownershipBadge != null) Destroy(board[i].ownershipBadge);
+                if (board[i].spawnedBuilding != null) Destroy(board[i].spawnedBuilding);
+                if (board[i].tileRenderer != null)
+                {
+                    board[i].tileRenderer.material = CreateColoredMaterial(GetOfficialColor(board[i]), 0.85f);
+                }
+            }
+        }
+
+        if (marketAuraRing != null) marketAuraRing.SetActive(false);
+
+        RebuildMonopolySynergyBeams();
+        HideDeedCard();
+        UpdateLiveHUDStats();
+        PlaySFX(cashRegisterSound, procCashClip, 1.0f);
+        RefreshDashboard("MATCH RESET (NEW GAME)", "Fresh $1500 match started! Distance-grab dice to roll.");
+        SetRivalReaction(AvatarMood.Thinking, "A fresh board! Let's see who builds the empire this time.");
     }
 
     int CalculatePlayerNetWorth(int playerIdx)
@@ -3138,7 +3679,15 @@ public class TycoonBoardManager : MonoBehaviour
         int net0 = CalculatePlayerNetWorth(0);
         int net1 = CalculatePlayerNetWorth(1);
         string monopolySummary = GetMonopolyProgressSummary(0);
-        dashboardStatsTMP.text = $"YOU: ${playerCash[0]} (NET: ${net0})  |  AI: ${playerCash[1]} (NET: ${net1})  |  POT: ${freeParkingJackpot}  |  {monopolySummary}";
+        string cycleBadge = "";
+        switch (currentMarketCycle)
+        {
+            case MarketCycle.BullBoom: cycleBadge = "MARKET: BULL BOOM (+50% RENT)"; break;
+            case MarketCycle.BearRecession: cycleBadge = "MARKET: BEAR RECESSION (-30% BUILD)"; break;
+            case MarketCycle.TechIPOSurge: cycleBadge = "MARKET: TECH IPO (2.5x TRANSIT)"; break;
+            default: cycleBadge = "MARKET: STANDARD"; break;
+        }
+        dashboardStatsTMP.text = $"YOU: ${playerCash[0]} (NET: ${net0})  |  AI: ${playerCash[1]} (NET: ${net1})  |  POT: ${freeParkingJackpot}  |  {cycleBadge}\n{monopolySummary}";
     }
 
     void RefreshDashboard(string eventHeadline, string promptLine)
