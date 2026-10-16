@@ -68,16 +68,23 @@ public class TycoonBoardManager : MonoBehaviour
 
     private BoardTile[] board = new BoardTile[40];
 
-    private int[] playerCash = new int[2] { 1500, 1500 };
-    private int[] playerPos = new int[2] { 0, 0 };
-    private bool[] inJail = new bool[2] { false, false };
-    private Transform[] playerTokens = new Transform[2];
+    private int[] playerCash = new int[4] { 1500, 1500, 1500, 1500 };
+    private int[] playerPos = new int[4] { 0, 0, 0, 0 };
+    private bool[] inJail = new bool[4] { false, false, false, false };
+    private Transform[] playerTokens = new Transform[4];
+    private bool[] isBankrupt = new bool[4] { false, false, false, false };
+    private int activePlayerCount = 4;
+    private int startingCashConfig = 1500;
+
+    public enum AIDifficulty { Tycoon, Billionaire, Casual }
+    private AIDifficulty aiDifficulty = AIDifficulty.Tycoon;
+
     private int buildCycleCursor = 0;
 
     private int freeParkingJackpot = 100;
     private Transform jackpotGoldPile;
 
-    private enum TurnState { WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
+    private enum TurnState { StartMenu, WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
     private TurnState currentState = TurnState.WaitingForRoll;
     private int lastDiceTotal = 0;
     private int consecutiveDoubles = 0;
@@ -101,15 +108,31 @@ public class TycoonBoardManager : MonoBehaviour
     private bool isHoldingDeedCrystal = false;
     private bool isHoldingDeedWithRight = true;
 
+    // 4-Player AI Avatar Arrays (1 = Alpha [North], 2 = Beta [West], 3 = Gamma [East])
+    private Transform[] rivalAvatarRoots = new Transform[4];
+    private Transform[] rivalHeadTransforms = new Transform[4];
+    private Transform[] rivalLeftHands = new Transform[4];
+    private Transform[] rivalRightHands = new Transform[4];
+    private Renderer[] rivalVisorRenderers = new Renderer[4];
+    private TextMeshProUGUI[] rivalSpeechBubbles = new TextMeshProUGUI[4];
+    private enum AvatarMood { Neutral, HappyCheer, AngrySlam, Thinking }
+    private AvatarMood[] currentRivalMoods = new AvatarMood[4] { AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral };
+    private float[] moodResetTimers = new float[4];
+
+    // Legacy single avatar references for backwards compatibility
     private Transform rivalAvatarRoot;
     private Transform rivalHeadTransform;
     private Transform rivalLeftHandTransform;
     private Transform rivalRightHandTransform;
     private Renderer rivalVisorRenderer;
     private TextMeshProUGUI rivalSpeechBubbleTMP;
-    private enum AvatarMood { Neutral, HappyCheer, AngrySlam, Thinking }
     private AvatarMood currentRivalMood = AvatarMood.Neutral;
     private float moodResetTimer = 0f;
+
+    // Phase 9: 3D Holographic Start Menu Fields
+    private GameObject startMenuHolder;
+    private Transform[] startMenuButtonTransforms = new Transform[4];
+    private TextMeshProUGUI[] startMenuButtonTexts = new TextMeshProUGUI[4];
 
     private TextMeshProUGUI dashboardTitleTMP;
     private TextMeshProUGUI dashboardBodyTMP;
@@ -268,7 +291,7 @@ public class TycoonBoardManager : MonoBehaviour
 
    void EnforceUnderlayPassthrough()
     {
-        OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>(FindObjectsSortMode.None);
+        OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>();
         for (int i = 0; i < layers.Length; i++)
         {
             if (layers[i] == null) continue;
@@ -310,6 +333,7 @@ public class TycoonBoardManager : MonoBehaviour
         Create3DDeedCardPopup();
         CreateGrabbable3DDeedCrystal();
         Create3DTouchButtonsOnTable();
+        Create3DHolographicStartMenu();
         CreateFloatingVRControls();
         CreatePlayerTokens();
         CreateVRSkyDome();
@@ -330,10 +354,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
         else
         {
-            RefreshDashboard(
-                "YOUR TURN — DISTANCE-GRAB & THROW DICE!",
-                "Point & Pinch with your hand to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
-            );
+            ShowStartMenu();
         }
     }
 
@@ -461,6 +482,46 @@ public class TycoonBoardManager : MonoBehaviour
         if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
         if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", metallic);
         return m;
+    }
+
+    public Color GetPlayerColor(int p)
+    {
+        switch (p)
+        {
+            case 0: return new Color(0.18f, 0.85f, 0.45f); // Emerald Green (YOU)
+            case 1: return new Color(0.85f, 0.30f, 0.55f); // Crimson Purple (MOGUL ALPHA)
+            case 2: return new Color(0.15f, 0.78f, 0.96f); // Cyber Cyan (BARONESS BETA)
+            case 3: return new Color(0.95f, 0.65f, 0.12f); // Royal Gold/Amber (TITAN GAMMA)
+            default: return Color.white;
+        }
+    }
+
+    public string GetPlayerName(int p)
+    {
+        switch (p)
+        {
+            case 0: return "YOU";
+            case 1: return "MOGUL ALPHA";
+            case 2: return "BARONESS BETA";
+            case 3: return "TITAN GAMMA";
+            default: return $"PLAYER {p}";
+        }
+    }
+
+    void UpdateActivePlayerVisibilities()
+    {
+        for (int p = 0; p < 4; p++)
+        {
+            bool isActive = (p < activePlayerCount) && !isBankrupt[p];
+            if (p > 0 && rivalAvatarRoots[p] != null)
+            {
+                rivalAvatarRoots[p].gameObject.SetActive(isActive);
+            }
+            if (playerTokens[p] != null)
+            {
+                playerTokens[p].gameObject.SetActive(isActive);
+            }
+        }
     }
 
     void CacheMetaInteractionSDKHands()
@@ -735,6 +796,49 @@ public class TycoonBoardManager : MonoBehaviour
         bool rightPinchHeld = false;
         bool leftPinchHeld = false;
         ReadMetaISDKHands(out rightPinchDown, out leftPinchDown, out rightPinchHeld, out leftPinchHeld);
+
+        if (currentState == TurnState.StartMenu)
+        {
+            int startBtn = CheckStartMenuButtonPoke();
+            bool spaceOrEnter = Keyboard.current != null && (Keyboard.current.spaceKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame);
+            bool rKey = Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
+            bool diffKey = Keyboard.current != null && Keyboard.current.dKey.wasPressedThisFrame;
+            bool cashKey = Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
+
+            if (startBtn == 0 || rKey)
+            {
+                activePlayerCount++;
+                if (activePlayerCount > 4) activePlayerCount = 2;
+                UpdateActivePlayerVisibilities();
+                UpdateStartMenuUI();
+                PlaySFX(tokenMoveSound, procStepClip, 1.2f);
+                PlayHaptic(0.2f, 0.1f);
+            }
+            else if (startBtn == 1 || diffKey)
+            {
+                if (aiDifficulty == AIDifficulty.Tycoon) aiDifficulty = AIDifficulty.Billionaire;
+                else if (aiDifficulty == AIDifficulty.Billionaire) aiDifficulty = AIDifficulty.Casual;
+                else aiDifficulty = AIDifficulty.Tycoon;
+                UpdateStartMenuUI();
+                PlaySFX(tokenMoveSound, procStepClip, 1.3f);
+                PlayHaptic(0.2f, 0.1f);
+            }
+            else if (startBtn == 2 || cashKey)
+            {
+                if (startingCashConfig == 1500) startingCashConfig = 2500;
+                else if (startingCashConfig == 2500) startingCashConfig = 1000;
+                else startingCashConfig = 1500;
+                UpdateStartMenuUI();
+                PlaySFX(procCashClip, procCashClip, 1.1f);
+                PlayHaptic(0.2f, 0.1f);
+            }
+            else if (startBtn == 3 || spaceOrEnter)
+            {
+                LaunchEmpireMatch();
+            }
+
+            return;
+        }
 
         if (isInPenthouseVR)
         {
@@ -1097,29 +1201,51 @@ public class TycoonBoardManager : MonoBehaviour
 
     void Create3DRivalMogulAvatar()
     {
-        GameObject avatarHolder = new GameObject("Rival_Mogul_3D_Avatar");
-        avatarHolder.transform.SetParent(transform, false);
-        avatarHolder.transform.localPosition = new Vector3(0f, 0.14f, (boardSize * 0.5f) + 0.22f);
-        avatarHolder.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
-        rivalAvatarRoot = avatarHolder.transform;
+        Create3DRivalMogulAvatars();
+    }
 
-        if (rivalAvatarPrefab != null && rivalAvatarPrefab.GetComponent<OVRCameraRig>() == null)
+    void Create3DRivalMogulAvatars()
+    {
+        // Player 1 (MOGUL ALPHA — Aggressive Shark): North (+Z, rot 180)
+        CreateSingleAIAvatar(1, new Vector3(0f, 0.14f, (boardSize * 0.5f) + 0.22f), Quaternion.Euler(0f, 180f, 0f));
+
+        // Player 2 (BARONESS BETA — Tech & Transit): West (-X, rot 90)
+        CreateSingleAIAvatar(2, new Vector3(-(boardSize * 0.5f) - 0.22f, 0.14f, 0f), Quaternion.Euler(0f, 90f, 0f));
+
+        // Player 3 (TITAN GAMMA — Conservative Banker): East (+X, rot -90)
+        CreateSingleAIAvatar(3, new Vector3((boardSize * 0.5f) + 0.22f, 0.14f, 0f), Quaternion.Euler(0f, -90f, 0f));
+
+        UpdateActivePlayerVisibilities();
+    }
+
+    void CreateSingleAIAvatar(int p, Vector3 localPos, Quaternion localRot)
+    {
+        string aiName = GetPlayerName(p);
+        Color sigColor = GetPlayerColor(p);
+
+        GameObject avatarHolder = new GameObject($"Rival_Avatar_P{p}_{aiName.Replace(" ", "_")}");
+        avatarHolder.transform.SetParent(transform, false);
+        avatarHolder.transform.localPosition = localPos;
+        avatarHolder.transform.localRotation = localRot;
+        rivalAvatarRoots[p] = avatarHolder.transform;
+
+        if (p == 1 && rivalAvatarPrefab != null && rivalAvatarPrefab.GetComponent<OVRCameraRig>() == null)
         {
             GameObject customModel = Instantiate(rivalAvatarPrefab, avatarHolder.transform);
             StripRoguePhysicsFromImportedPrefab(customModel);
             customModel.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(customModel, 0.35f);
-            rivalHeadTransform = customModel.transform;
+            rivalHeadTransforms[p] = customModel.transform;
         }
         else
         {
             Material suitMat = CreateColoredMaterial(new Color(0.10f, 0.12f, 0.18f), 0.85f, 0.4f);
-            Material goldLapelMat = CreateColoredMaterial(new Color(0.92f, 0.74f, 0.22f), 0.9f, 0.85f);
+            Material lapelMat = CreateColoredMaterial(sigColor, 0.9f, 0.85f);
             Material headMat = CreateColoredMaterial(new Color(0.82f, 0.86f, 0.94f), 0.9f, 0.7f);
-            Material visorMat = CreateColoredMaterial(new Color(0.15f, 0.88f, 1f), 0.95f);
+            Material visorMat = CreateColoredMaterial(sigColor, 0.95f);
 
             GameObject torso = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            torso.name = "Mogul_Torso";
+            torso.name = $"{aiName}_Torso";
             torso.transform.SetParent(avatarHolder.transform, false);
             torso.transform.localPosition = new Vector3(0f, -0.04f, 0f);
             torso.transform.localScale = new Vector3(0.18f, 0.14f, 0.11f);
@@ -1127,51 +1253,51 @@ public class TycoonBoardManager : MonoBehaviour
             torso.GetComponent<Renderer>().material = suitMat;
 
             GameObject tie = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            tie.name = "Mogul_Gold_Tie";
+            tie.name = $"{aiName}_Tie";
             tie.transform.SetParent(torso.transform, false);
             tie.transform.localPosition = new Vector3(0f, 0.25f, 0.48f);
             tie.transform.localScale = new Vector3(0.18f, 0.55f, 0.12f);
             Destroy(tie.GetComponent<Collider>());
-            tie.GetComponent<Renderer>().material = goldLapelMat;
+            tie.GetComponent<Renderer>().material = lapelMat;
 
             GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            head.name = "Mogul_Head";
+            head.name = $"{aiName}_Head";
             head.transform.SetParent(avatarHolder.transform, false);
             head.transform.localPosition = new Vector3(0f, 0.16f, 0f);
             head.transform.localScale = new Vector3(0.12f, 0.135f, 0.12f);
             Destroy(head.GetComponent<Collider>());
             head.GetComponent<Renderer>().material = headMat;
-            rivalHeadTransform = head.transform;
+            rivalHeadTransforms[p] = head.transform;
 
             GameObject visor = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            visor.name = "Mogul_Visor";
+            visor.name = $"{aiName}_Visor";
             visor.transform.SetParent(head.transform, false);
             visor.transform.localPosition = new Vector3(0f, 0.08f, 0.44f);
             visor.transform.localScale = new Vector3(0.72f, 0.22f, 0.22f);
             Destroy(visor.GetComponent<Collider>());
-            rivalVisorRenderer = visor.GetComponent<Renderer>();
-            rivalVisorRenderer.material = visorMat;
+            rivalVisorRenderers[p] = visor.GetComponent<Renderer>();
+            rivalVisorRenderers[p].material = visorMat;
 
             GameObject lHand = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            lHand.name = "Mogul_Left_Hand";
+            lHand.name = $"{aiName}_Left_Hand";
             lHand.transform.SetParent(avatarHolder.transform, false);
             lHand.transform.localPosition = new Vector3(-0.16f, 0.02f, 0.10f);
             lHand.transform.localScale = new Vector3(0.045f, 0.035f, 0.055f);
             Destroy(lHand.GetComponent<Collider>());
-            lHand.GetComponent<Renderer>().material = goldLapelMat;
-            rivalLeftHandTransform = lHand.transform;
+            lHand.GetComponent<Renderer>().material = lapelMat;
+            rivalLeftHands[p] = lHand.transform;
 
             GameObject rHand = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            rHand.name = "Mogul_Right_Hand";
+            rHand.name = $"{aiName}_Right_Hand";
             rHand.transform.SetParent(avatarHolder.transform, false);
             rHand.transform.localPosition = new Vector3(0.16f, 0.02f, 0.10f);
             rHand.transform.localScale = new Vector3(0.045f, 0.035f, 0.055f);
             Destroy(rHand.GetComponent<Collider>());
-            rHand.GetComponent<Renderer>().material = goldLapelMat;
-            rivalRightHandTransform = rHand.transform;
+            rHand.GetComponent<Renderer>().material = lapelMat;
+            rivalRightHands[p] = rHand.transform;
         }
 
-        GameObject bubbleCanvas = new GameObject("Mogul_Speech_Bubble");
+        GameObject bubbleCanvas = new GameObject($"{aiName}_Speech_Bubble");
         bubbleCanvas.transform.SetParent(avatarHolder.transform, false);
         bubbleCanvas.transform.localPosition = new Vector3(0f, 0.29f, 0f);
         bubbleCanvas.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
@@ -1181,69 +1307,100 @@ public class TycoonBoardManager : MonoBehaviour
         c.renderMode = RenderMode.WorldSpace;
         bubbleCanvas.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 110f);
 
-        rivalSpeechBubbleTMP = CreateUGUIText(bubbleCanvas.transform, "BubbleText", Vector2.zero, 30, new Color(1f, 0.90f, 0.45f));
-        rivalSpeechBubbleTMP.text = "MOGUL AI: \"Let's see what you've got!\"";
+        rivalSpeechBubbles[p] = CreateUGUIText(bubbleCanvas.transform, "BubbleText", Vector2.zero, 30, sigColor);
+        rivalSpeechBubbles[p].text = $"{aiName}: \"Let's see what you've got!\"";
+
+        if (p == 1)
+        {
+            rivalAvatarRoot = rivalAvatarRoots[1];
+            rivalHeadTransform = rivalHeadTransforms[1];
+            rivalLeftHandTransform = rivalLeftHands[1];
+            rivalRightHandTransform = rivalRightHands[1];
+            rivalVisorRenderer = rivalVisorRenderers[1];
+            rivalSpeechBubbleTMP = rivalSpeechBubbles[1];
+        }
+    }
+
+    void SetRivalReaction(int aiPlayerIdx, AvatarMood mood, string speechLine, float duration = 3.0f)
+    {
+        if (aiPlayerIdx < 1 || aiPlayerIdx > 3) aiPlayerIdx = 1;
+        currentRivalMoods[aiPlayerIdx] = mood;
+        moodResetTimers[aiPlayerIdx] = duration;
+
+        if (rivalSpeechBubbles[aiPlayerIdx] != null)
+        {
+            rivalSpeechBubbles[aiPlayerIdx].text = $"{GetPlayerName(aiPlayerIdx)}: \"{speechLine}\"";
+        }
+
+        if (rivalVisorRenderers[aiPlayerIdx] != null)
+        {
+            Color visorCol = GetPlayerColor(aiPlayerIdx);
+            if (mood == AvatarMood.HappyCheer) visorCol = new Color(0.20f, 1f, 0.45f);
+            else if (mood == AvatarMood.AngrySlam) visorCol = new Color(1f, 0.18f, 0.20f);
+            else if (mood == AvatarMood.Thinking) visorCol = new Color(1f, 0.84f, 0.20f);
+            rivalVisorRenderers[aiPlayerIdx].material = CreateColoredMaterial(visorCol, 0.95f);
+        }
+
+        if (aiPlayerIdx == 1)
+        {
+            currentRivalMood = mood;
+            moodResetTimer = duration;
+        }
     }
 
     void SetRivalReaction(AvatarMood mood, string speechLine, float duration = 3.0f)
     {
-        currentRivalMood = mood;
-        moodResetTimer = duration;
-        if (rivalSpeechBubbleTMP != null)
-        {
-            rivalSpeechBubbleTMP.text = $"MOGUL AI: \"{speechLine}\"";
-        }
-
-        if (rivalVisorRenderer != null)
-        {
-            Color visorCol = new Color(0.15f, 0.88f, 1f);
-            if (mood == AvatarMood.HappyCheer) visorCol = new Color(0.20f, 1f, 0.45f);
-            else if (mood == AvatarMood.AngrySlam) visorCol = new Color(1f, 0.18f, 0.20f);
-            else if (mood == AvatarMood.Thinking) visorCol = new Color(1f, 0.84f, 0.20f);
-            rivalVisorRenderer.material = CreateColoredMaterial(visorCol, 0.95f);
-        }
+        SetRivalReaction(1, mood, speechLine, duration);
     }
 
     void AnimateRivalMogulAvatar()
     {
-        if (rivalAvatarRoot == null) return;
-
-        if (moodResetTimer > 0f)
-        {
-            moodResetTimer -= Time.deltaTime;
-            if (moodResetTimer <= 0f)
-            {
-                currentRivalMood = AvatarMood.Neutral;
-                if (rivalVisorRenderer != null)
-                    rivalVisorRenderer.material = CreateColoredMaterial(new Color(0.15f, 0.88f, 1f), 0.95f);
-            }
-        }
-
         float t = Time.time;
-        rivalAvatarRoot.localPosition = new Vector3(0f, 0.14f + Mathf.Sin(t * 2.2f) * 0.008f, (boardSize * 0.5f) + 0.22f);
-
-        if (rivalHeadTransform != null && rivalLeftHandTransform != null && rivalRightHandTransform != null)
+        for (int p = 1; p <= 3; p++)
         {
-            switch (currentRivalMood)
+            if (rivalAvatarRoots[p] == null || !rivalAvatarRoots[p].gameObject.activeSelf) continue;
+
+            if (moodResetTimers[p] > 0f)
             {
-                case AvatarMood.HappyCheer:
-                    rivalHeadTransform.localRotation = Quaternion.Euler(Mathf.Sin(t * 12f) * 10f, 0f, 0f);
-                    rivalLeftHandTransform.localPosition = new Vector3(-0.16f, 0.12f + Mathf.Sin(t * 14f) * 0.045f, 0.10f);
-                    rivalRightHandTransform.localPosition = new Vector3(0.16f, 0.12f + Mathf.Cos(t * 14f) * 0.045f, 0.10f);
-                    break;
+                moodResetTimers[p] -= Time.deltaTime;
+                if (moodResetTimers[p] <= 0f)
+                {
+                    currentRivalMoods[p] = AvatarMood.Neutral;
+                    if (rivalVisorRenderers[p] != null)
+                        rivalVisorRenderers[p].material = CreateColoredMaterial(GetPlayerColor(p), 0.95f);
+                }
+            }
 
-                case AvatarMood.AngrySlam:
-                    rivalHeadTransform.localRotation = Quaternion.Euler(8f, Mathf.Sin(t * 22f) * 18f, 0f);
-                    float slamY = 0.01f + Mathf.Abs(Mathf.Sin(t * 16f)) * 0.06f;
-                    rivalLeftHandTransform.localPosition = new Vector3(-0.15f, slamY, 0.14f);
-                    rivalRightHandTransform.localPosition = new Vector3(0.15f, slamY, 0.14f);
-                    break;
+            Vector3 basePos;
+            if (p == 1) basePos = new Vector3(0f, 0.14f, (boardSize * 0.5f) + 0.22f);
+            else if (p == 2) basePos = new Vector3(-(boardSize * 0.5f) - 0.22f, 0.14f, 0f);
+            else basePos = new Vector3((boardSize * 0.5f) + 0.22f, 0.14f, 0f);
 
-                default:
-                    rivalHeadTransform.localRotation = Quaternion.Euler(Mathf.Sin(t * 1.5f) * 4f, Mathf.Cos(t * 1.1f) * 8f, 0f);
-                    rivalLeftHandTransform.localPosition = new Vector3(-0.16f, 0.02f + Mathf.Sin(t * 2.5f) * 0.01f, 0.10f);
-                    rivalRightHandTransform.localPosition = new Vector3(0.16f, 0.02f + Mathf.Cos(t * 2.5f) * 0.01f, 0.10f);
-                    break;
+            rivalAvatarRoots[p].localPosition = basePos + new Vector3(0f, Mathf.Sin(t * 2.2f + p * 1.5f) * 0.008f, 0f);
+
+            if (rivalHeadTransforms[p] != null && rivalLeftHands[p] != null && rivalRightHands[p] != null)
+            {
+                switch (currentRivalMoods[p])
+                {
+                    case AvatarMood.HappyCheer:
+                        rivalHeadTransforms[p].localRotation = Quaternion.Euler(Mathf.Sin(t * 12f) * 10f, 0f, 0f);
+                        rivalLeftHands[p].localPosition = new Vector3(-0.16f, 0.12f + Mathf.Sin(t * 14f) * 0.045f, 0.10f);
+                        rivalRightHands[p].localPosition = new Vector3(0.16f, 0.12f + Mathf.Cos(t * 14f) * 0.045f, 0.10f);
+                        break;
+
+                    case AvatarMood.AngrySlam:
+                        rivalHeadTransforms[p].localRotation = Quaternion.Euler(8f, Mathf.Sin(t * 22f) * 18f, 0f);
+                        float slamY = 0.01f + Mathf.Abs(Mathf.Sin(t * 16f)) * 0.06f;
+                        rivalLeftHands[p].localPosition = new Vector3(-0.15f, slamY, 0.14f);
+                        rivalRightHands[p].localPosition = new Vector3(0.15f, slamY, 0.14f);
+                        break;
+
+                    default:
+                        rivalHeadTransforms[p].localRotation = Quaternion.Euler(Mathf.Sin(t * 1.5f + p) * 4f, Mathf.Cos(t * 1.1f + p) * 8f, 0f);
+                        rivalLeftHands[p].localPosition = new Vector3(-0.16f, 0.02f + Mathf.Sin(t * 2.5f + p) * 0.01f, 0.10f);
+                        rivalRightHands[p].localPosition = new Vector3(0.16f, 0.02f + Mathf.Cos(t * 2.5f + p) * 0.01f, 0.10f);
+                        break;
+                }
             }
         }
     }
@@ -1253,7 +1410,7 @@ public class TycoonBoardManager : MonoBehaviour
         BoardTile currentTile = board[playerPos[0]];
         BoardTile targetTile = null;
 
-        if (currentTile.owner == 1 && (currentTile.type == TileType.Property || currentTile.type == TileType.Railroad || currentTile.type == TileType.Utility))
+        if (currentTile.owner > 0 && currentTile.owner < activePlayerCount && (currentTile.type == TileType.Property || currentTile.type == TileType.Railroad || currentTile.type == TileType.Utility))
         {
             targetTile = currentTile;
         }
@@ -1261,7 +1418,7 @@ public class TycoonBoardManager : MonoBehaviour
         {
             for (int i = 0; i < 40; i++)
             {
-                if (board[i].owner == 1 && board[i].colorGroup >= 0 && PlayerOwnsAnyInGroup(0, board[i].colorGroup))
+                if (board[i].owner > 0 && board[i].owner < activePlayerCount && board[i].colorGroup >= 0 && PlayerOwnsAnyInGroup(0, board[i].colorGroup))
                 {
                     targetTile = board[i];
                     break;
@@ -1271,7 +1428,7 @@ public class TycoonBoardManager : MonoBehaviour
             {
                 for (int i = 0; i < 40; i++)
                 {
-                    if (board[i].owner == 1)
+                    if (board[i].owner > 0 && board[i].owner < activePlayerCount)
                     {
                         targetTile = board[i];
                         break;
@@ -1282,40 +1439,34 @@ public class TycoonBoardManager : MonoBehaviour
 
         if (targetTile == null)
         {
-            RefreshDashboard("NO RIVAL PROPERTY FOR TAKEOVER", "Mogul AI doesn't own any properties yet! Roll and play on.");
+            RefreshDashboard("NO RIVAL PROPERTY FOR TAKEOVER", "No rivals own properties for takeover yet! Roll and play on.");
             return;
         }
+
+        int rivalOwner = targetTile.owner;
+        string rivalName = GetPlayerName(rivalOwner);
 
         int buyoutPrice = (targetTile.price * 2) + (targetTile.buildingLevel * targetTile.buildCost);
         if (playerCash[0] < buyoutPrice)
         {
-            RefreshDashboard($"HOSTILE TAKEOVER NEEDS ${buyoutPrice}", $"You need ${buyoutPrice} to force Mogul AI to sell {targetTile.name}!");
-            SetRivalReaction(AvatarMood.HappyCheer, $"Haha! You can't afford to buy out {targetTile.name}!");
+            RefreshDashboard($"HOSTILE TAKEOVER NEEDS ${buyoutPrice}", $"You need ${buyoutPrice} to force {rivalName} to sell {targetTile.name}!");
+            SetRivalReaction(rivalOwner, AvatarMood.HappyCheer, $"Haha! You can't afford to buy out {targetTile.name}!");
             return;
         }
 
         playerCash[0] -= buyoutPrice;
-        playerCash[1] += buyoutPrice;
+        playerCash[rivalOwner] += buyoutPrice;
         targetTile.owner = 0;
 
         PlaySFX(cashRegisterSound, procCashClip, 1.3f);
         PlaySFX(buildUpgradeSound, procBuildClip, 1.15f);
-        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[1].position, 10));
+        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[rivalOwner].position, 10));
 
-        Color playerColor = new Color(0.18f, 0.85f, 0.45f);
-        if (targetTile.tileRenderer != null)
-        {
-            targetTile.tileRenderer.material = CreateColoredMaterial(playerColor, 0.85f);
-        }
-        if (targetTile.ownershipBadge != null)
-        {
-            targetTile.ownershipBadge.GetComponent<Renderer>().material = CreateColoredMaterial(playerColor, 0.95f);
-        }
-
+        ApplyTileOwnershipVisuals(targetTile, 0);
         RebuildMonopolySynergyBeams();
-        SetRivalReaction(AvatarMood.AngrySlam, $"NO! You seized {targetTile.name} in a Hostile Takeover!");
-        ShowSpecialEventCard("HOSTILE TAKEOVER!", $"You paid ${buyoutPrice} to seize\n<b>{targetTile.name}</b>\nfrom Mogul AI!", new Color(0.95f, 0.74f, 0.15f));
-        RefreshDashboard($"HOSTILE TAKEOVER: SEIZED {targetTile.name}!", $"Paid ${buyoutPrice} buyout to Mogul AI! Property is now YOURS!");
+        SetRivalReaction(rivalOwner, AvatarMood.AngrySlam, $"NO! You seized {targetTile.name} in a Hostile Takeover!");
+        ShowSpecialEventCard("HOSTILE TAKEOVER!", $"You paid ${buyoutPrice} to seize\n<b>{targetTile.name}</b>\nfrom {rivalName}!", new Color(0.95f, 0.74f, 0.15f));
+        RefreshDashboard($"HOSTILE TAKEOVER: SEIZED {targetTile.name}!", $"Paid ${buyoutPrice} buyout to {rivalName}! Property is now YOURS!");
 
         if (OwnsFullColorGroup(0, targetTile.colorGroup))
         {
@@ -1335,7 +1486,9 @@ public class TycoonBoardManager : MonoBehaviour
 
     void ExecuteTradeDeal(BoardTile targetTile)
     {
-        if (targetTile == null || targetTile.owner != 1) return;
+        if (targetTile == null || targetTile.owner <= 0 || targetTile.owner >= activePlayerCount) return;
+        int aiIdx = targetTile.owner;
+        string aiName = GetPlayerName(aiIdx);
 
         // Count properties in this color group and AI's holdings
         int totalInGroup = 0;
@@ -1347,7 +1500,7 @@ public class TycoonBoardManager : MonoBehaviour
                 if (board[i].colorGroup == targetTile.colorGroup)
                 {
                     totalInGroup++;
-                    if (board[i].owner == 1) aiInGroup++;
+                    if (board[i].owner == aiIdx) aiInGroup++;
                 }
             }
         }
@@ -1355,8 +1508,8 @@ public class TycoonBoardManager : MonoBehaviour
         // If the AI already holds 2/3 of that color group, Mogul AI refuses
         if (totalInGroup > 0 && aiInGroup >= 2 && ((float)aiInGroup / totalInGroup) >= 0.65f)
         {
-            SetRivalReaction(AvatarMood.AngrySlam, "No way! I'm building a monopoly here—use Hostile Takeover if you dare!");
-            RefreshDashboard("TRADE OFFER REFUSED!", $"Mogul AI refuses: holds {aiInGroup}/{totalInGroup} properties and wants a Monopoly!");
+            SetRivalReaction(aiIdx, AvatarMood.AngrySlam, "No way! I'm building a monopoly here—use Hostile Takeover if you dare!");
+            RefreshDashboard("TRADE OFFER REFUSED!", $"{aiName} refuses: holds {aiInGroup}/{totalInGroup} properties and wants a Monopoly!");
             PlaySFX(diceRollSound, procDiceClip, 0.75f);
             return;
         }
@@ -1376,7 +1529,7 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
 
-        bool aiLowOnCash = playerCash[1] < 400;
+        bool aiLowOnCash = playerCash[aiIdx] < 400;
         bool aiOwnsOnlyThisInGroup = (aiInGroup <= 1);
         bool canOfferBuyout = aiLowOnCash || aiOwnsOnlyThisInGroup;
 
@@ -1391,18 +1544,18 @@ public class TycoonBoardManager : MonoBehaviour
             }
 
             playerCash[0] -= cashSweetener;
-            playerCash[1] += cashSweetener;
+            playerCash[aiIdx] += cashSweetener;
 
             targetTile.owner = 0;
             ApplyTileOwnershipVisuals(targetTile, 0);
 
-            playerSolitary.owner = 1;
-            ApplyTileOwnershipVisuals(playerSolitary, 1);
+            playerSolitary.owner = aiIdx;
+            ApplyTileOwnershipVisuals(playerSolitary, aiIdx);
 
-            SetRivalReaction(AvatarMood.HappyCheer, "Pleasure doing business with you!");
+            SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
             RefreshDashboard($"DEAL ACCEPTED: SWAPPED {playerSolitary.name} FOR {targetTile.name}!", $"Merger sealed with ${cashSweetener} cash sweetener!");
 
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[1].position, 8));
+            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
             PlaySFX(cashRegisterSound, procCashClip, 1.1f);
         }
         else if (canOfferBuyout)
@@ -1416,21 +1569,21 @@ public class TycoonBoardManager : MonoBehaviour
             }
 
             playerCash[0] -= buyoutPrice;
-            playerCash[1] += buyoutPrice;
+            playerCash[aiIdx] += buyoutPrice;
 
             targetTile.owner = 0;
             ApplyTileOwnershipVisuals(targetTile, 0);
 
-            SetRivalReaction(AvatarMood.HappyCheer, "Pleasure doing business with you!");
+            SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
             RefreshDashboard($"DEAL ACCEPTED: 1.35x BUYOUT OF {targetTile.name}!", $"Acquired for ${buyoutPrice} (saving 32% vs 2x Hostile Takeover)!");
 
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[1].position, 8));
+            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
             PlaySFX(cashRegisterSound, procCashClip, 1.1f);
         }
         else
         {
-            SetRivalReaction(AvatarMood.Thinking, "I have plenty of cash and I like this property. Give me a solitary deed or use Hostile Takeover!");
-            RefreshDashboard("TRADE STALEMATE", "Mogul AI demands a deed swap, or use [TAKEOVER (T)] for 2x cash!");
+            SetRivalReaction(aiIdx, AvatarMood.Thinking, "I have plenty of cash and I like this property. Give me a solitary deed or use Hostile Takeover!");
+            RefreshDashboard("TRADE STALEMATE", $"{aiName} demands a deed swap, or use [TAKEOVER (T)] for 2x cash!");
             return;
         }
 
@@ -1674,8 +1827,14 @@ public class TycoonBoardManager : MonoBehaviour
         for (int group = 0; group < 8; group++)
         {
             int groupOwner = -1;
-            if (OwnsFullColorGroup(0, group)) groupOwner = 0;
-            else if (OwnsFullColorGroup(1, group)) groupOwner = 1;
+            for (int p = 0; p < activePlayerCount; p++)
+            {
+                if (OwnsFullColorGroup(p, group))
+                {
+                    groupOwner = p;
+                    break;
+                }
+            }
 
             if (groupOwner != -1)
             {
@@ -1685,7 +1844,7 @@ public class TycoonBoardManager : MonoBehaviour
                     if (board[i].colorGroup == group) groupTiles.Add(board[i].tileTransform);
                 }
 
-                Color beamColor = (groupOwner == 0) ? new Color(1f, 0.86f, 0.22f) : new Color(0.95f, 0.25f, 0.65f);
+                Color beamColor = GetPlayerColor(groupOwner);
                 Material beamMat = CreateColoredMaterial(beamColor, 0.95f);
 
                 for (int j = 0; j < groupTiles.Count - 1; j++)
@@ -2483,7 +2642,7 @@ public class TycoonBoardManager : MonoBehaviour
                 if (offerDealButtonTransform != null) offerDealButtonTransform.gameObject.SetActive(false);
                 if (offerDealBtnCanvasGO != null) offerDealBtnCanvasGO.SetActive(false);
             }
-            else if (tile.owner == 1)
+            else if (tile.owner > 0 && tile.owner < activePlayerCount)
             {
                 mortgageButtonTransform.gameObject.SetActive(false);
                 if (mortgageBtnCanvasGO != null) mortgageBtnCanvasGO.SetActive(false);
@@ -2787,6 +2946,211 @@ public class TycoonBoardManager : MonoBehaviour
         btn.localPosition = origPos;
     }
 
+    void Create3DHolographicStartMenu()
+    {
+        if (startMenuHolder != null) Destroy(startMenuHolder);
+
+        startMenuHolder = new GameObject("Executive_Start_Menu");
+        startMenuHolder.transform.SetParent(transform, false);
+        startMenuHolder.transform.localPosition = new Vector3(0f, 0.34f, -0.15f);
+        startMenuHolder.transform.localRotation = Quaternion.Euler(14f, 0f, 0f);
+
+        // Dark frosted holographic backdrop panel
+        GameObject bg = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        bg.name = "StartMenu_Backdrop";
+        bg.transform.SetParent(startMenuHolder.transform, false);
+        bg.transform.localPosition = Vector3.zero;
+        bg.transform.localRotation = Quaternion.identity;
+        bg.transform.localScale = new Vector3(0.54f, 0.36f, 0.012f);
+        Destroy(bg.GetComponent<Collider>());
+        bg.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.04f, 0.07f, 0.14f), 0.92f);
+
+        // Subtle accent border
+        GameObject border = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        border.name = "StartMenu_Border";
+        border.transform.SetParent(startMenuHolder.transform, false);
+        border.transform.localPosition = new Vector3(0f, 0f, 0.002f);
+        border.transform.localRotation = Quaternion.identity;
+        border.transform.localScale = new Vector3(0.548f, 0.368f, 0.008f);
+        Destroy(border.GetComponent<Collider>());
+        border.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.45f);
+
+        // Header Canvas
+        GameObject headerCanvasGO = new GameObject("StartMenu_HeaderCanvas");
+        headerCanvasGO.transform.SetParent(startMenuHolder.transform, false);
+        headerCanvasGO.transform.localPosition = new Vector3(0f, 0.125f, -0.015f);
+        headerCanvasGO.transform.localRotation = Quaternion.identity;
+        headerCanvasGO.transform.localScale = Vector3.one * 0.00065f;
+        Canvas hc = headerCanvasGO.AddComponent<Canvas>();
+        hc.renderMode = RenderMode.WorldSpace;
+        RectTransform hrt = headerCanvasGO.GetComponent<RectTransform>();
+        hrt.sizeDelta = new Vector2(760f, 100f);
+
+        GameObject headerTxtGO = new GameObject("HeaderTitle");
+        headerTxtGO.transform.SetParent(headerCanvasGO.transform, false);
+        TextMeshProUGUI headerTMP = headerTxtGO.AddComponent<TextMeshProUGUI>();
+        headerTMP.text = "<color=#FFD700><b>TYCOON METROPOLIS</b></color>\n<size=22><color=#66DDFF>EXECUTIVE BOARDROOM MATCH SETUP</color></size>";
+        headerTMP.alignment = TextAlignmentOptions.Center;
+        headerTMP.rectTransform.sizeDelta = new Vector2(760f, 100f);
+
+        // 4 Interactive 3D Poke Buttons
+        // Button 0: Rivals Selector
+        // Button 1: Difficulty Selector
+        // Button 2: Start Cash Selector
+        // Button 3: Launch Empire Match
+        float[] yPositions = { 0.052f, -0.008f, -0.068f, -0.128f };
+        Color[] btnColors = {
+            new Color(0.18f, 0.45f, 0.85f), // Slate Blue
+            new Color(0.85f, 0.55f, 0.15f), // Royal Amber
+            new Color(0.55f, 0.25f, 0.85f), // Purple
+            new Color(0.18f, 0.85f, 0.45f)  // Emerald Green
+        };
+
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject btnCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            btnCube.name = $"StartMenu_Btn_{i}";
+            btnCube.transform.SetParent(startMenuHolder.transform, false);
+            btnCube.transform.localPosition = new Vector3(0f, yPositions[i], -0.010f);
+            btnCube.transform.localScale = new Vector3(0.46f, 0.046f, 0.018f);
+
+            BoxCollider col = btnCube.GetComponent<BoxCollider>();
+            if (col != null) col.isTrigger = true;
+            btnCube.GetComponent<Renderer>().material = CreateColoredMaterial(btnColors[i], 0.90f);
+            startMenuButtonTransforms[i] = btnCube.transform;
+
+            // Direct child canvas to avoid non-uniform scale squashing
+            GameObject btnCanvasGO = new GameObject($"StartMenu_Btn_Canvas_{i}");
+            btnCanvasGO.transform.SetParent(startMenuHolder.transform, false);
+            btnCanvasGO.transform.localPosition = new Vector3(0f, yPositions[i], -0.024f);
+            btnCanvasGO.transform.localRotation = Quaternion.identity;
+            btnCanvasGO.transform.localScale = Vector3.one * 0.00065f;
+
+            Canvas bc = btnCanvasGO.AddComponent<Canvas>();
+            bc.renderMode = RenderMode.WorldSpace;
+            RectTransform brt = btnCanvasGO.GetComponent<RectTransform>();
+            brt.sizeDelta = new Vector2(680f, 65f);
+
+            GameObject txtGO = new GameObject("Text");
+            txtGO.transform.SetParent(btnCanvasGO.transform, false);
+            TextMeshProUGUI tmp = txtGO.AddComponent<TextMeshProUGUI>();
+            tmp.fontSize = 28;
+            tmp.fontStyle = FontStyles.Bold;
+            tmp.color = Color.white;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.rectTransform.sizeDelta = new Vector2(680f, 65f);
+            startMenuButtonTexts[i] = tmp;
+        }
+
+        UpdateStartMenuUI();
+        startMenuHolder.SetActive(false);
+    }
+
+    void UpdateStartMenuUI()
+    {
+        if (startMenuButtonTexts[0] != null)
+        {
+            if (activePlayerCount == 2)
+                startMenuButtonTexts[0].text = "RIVALS: 1 AI (1v1 DUEL)";
+            else if (activePlayerCount == 3)
+                startMenuButtonTexts[0].text = "RIVALS: 2 AI (3-PLAYER MATCH)";
+            else
+                startMenuButtonTexts[0].text = "RIVALS: 3 AI (4-PLAYER FULL TABLE)";
+        }
+
+        if (startMenuButtonTexts[1] != null)
+        {
+            if (aiDifficulty == AIDifficulty.Tycoon)
+                startMenuButtonTexts[1].text = "DIFFICULTY: TYCOON (NORMAL)";
+            else if (aiDifficulty == AIDifficulty.Billionaire)
+                startMenuButtonTexts[1].text = "DIFFICULTY: BILLIONAIRE (HARD)";
+            else
+                startMenuButtonTexts[1].text = "DIFFICULTY: CASUAL (EASY)";
+        }
+
+        if (startMenuButtonTexts[2] != null)
+        {
+            if (startingCashConfig == 1500)
+                startMenuButtonTexts[2].text = "START CASH: $1500 (STANDARD)";
+            else if (startingCashConfig == 2500)
+                startMenuButtonTexts[2].text = "START CASH: $2500 (EXECUTIVE)";
+            else
+                startMenuButtonTexts[2].text = "START CASH: $1000 (HARDCORE)";
+        }
+
+        if (startMenuButtonTexts[3] != null)
+        {
+            startMenuButtonTexts[3].text = "LAUNCH EMPIRE MATCH";
+        }
+    }
+
+    public void ShowStartMenu()
+    {
+        currentState = TurnState.StartMenu;
+        if (startMenuHolder != null)
+        {
+            startMenuHolder.SetActive(true);
+        }
+        UpdateActivePlayerVisibilities();
+        UpdateStartMenuUI();
+        RefreshDashboard("EXECUTIVE START MENU", "Configure Rivals, Difficulty, & Starting Capital, then poke [LAUNCH]!");
+        SetRivalReaction(1, AvatarMood.Thinking, "Configure the boardroom match! Will you dare face 3 AI Moguls?");
+    }
+
+    public void LaunchEmpireMatch()
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            playerCash[i] = startingCashConfig;
+            playerPos[i] = 0;
+            isBankrupt[i] = false;
+            inJail[i] = false;
+            PositionTokenOnTile(i, 0);
+        }
+
+        UpdateActivePlayerVisibilities();
+        if (startMenuHolder != null)
+        {
+            startMenuHolder.SetActive(false);
+        }
+
+        PlaySFX(cashRegisterSound, procCashClip, 1.25f);
+        SpawnCelebrationFireworks(transform.position + Vector3.up * 0.35f);
+
+        currentState = TurnState.WaitingForRoll;
+        UpdateLiveHUDStats();
+        RefreshDashboard(
+            "MATCH LAUNCHED — YOUR TURN!",
+            "Point & Pinch to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
+        );
+        SetRivalReaction(1, AvatarMood.HappyCheer, $"Let the games begin! ${startingCashConfig} starting capital.");
+        SaveGameState();
+    }
+
+    int CheckStartMenuButtonPoke()
+    {
+        if (Time.time < lastButtonTouchTime) return -1;
+        if (!isRightHandTracked && !isLeftHandTracked) return -1;
+
+        for (int i = 0; i < startMenuButtonTransforms.Length; i++)
+        {
+            if (startMenuButtonTransforms[i] == null) continue;
+            Collider btnCol = startMenuButtonTransforms[i].GetComponent<Collider>();
+            if (btnCol == null) continue;
+
+            bool rightPoked = isRightHandTracked && Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.022f;
+            bool leftPoked = isLeftHandTracked && Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.022f;
+
+            if (rightPoked || leftPoked)
+            {
+                lastButtonTouchTime = Time.time + 0.40f;
+                StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[i]));
+                return i;
+            }
+        }
+        return -1;
+    }
+
     void GenerateProceduralSFX()
     {
         int sampleRate = 44100;
@@ -3012,12 +3376,16 @@ public class TycoonBoardManager : MonoBehaviour
 
     void CreatePlayerTokens()
     {
-        playerTokens[0] = SpawnPlayerTokenInstance(0, playerTokenPrefab, "Player_Vehicle_Token", brushedGoldMaterial);
-        Material silverMat = CreateColoredMaterial(new Color(0.80f, 0.85f, 0.92f), 0.85f, 0.9f);
-        playerTokens[1] = SpawnPlayerTokenInstance(1, aiRivalTokenPrefab, "AIRival_Vehicle_Token", silverMat);
+        playerTokens[0] = SpawnPlayerTokenInstance(0, playerTokenPrefab, "Player_Vehicle_Token", CreateColoredMaterial(GetPlayerColor(0), 0.9f));
+        playerTokens[1] = SpawnPlayerTokenInstance(1, aiRivalTokenPrefab, "AIRival1_Alpha_Token", CreateColoredMaterial(GetPlayerColor(1), 0.9f));
+        playerTokens[2] = SpawnPlayerTokenInstance(2, ambientTrafficCar1Prefab != null ? ambientTrafficCar1Prefab : aiRivalTokenPrefab, "AIRival2_Beta_Token", CreateColoredMaterial(GetPlayerColor(2), 0.9f));
+        playerTokens[3] = SpawnPlayerTokenInstance(3, ambientTrafficCar2Prefab != null ? ambientTrafficCar2Prefab : playerTokenPrefab, "AIRival3_Gamma_Token", CreateColoredMaterial(GetPlayerColor(3), 0.9f));
 
-        PositionTokenOnTile(0, 0);
-        PositionTokenOnTile(1, 0);
+        for (int p = 0; p < 4; p++)
+        {
+            PositionTokenOnTile(p, 0);
+        }
+        UpdateActivePlayerVisibilities();
     }
 
     Transform SpawnPlayerTokenInstance(int playerIdx, GameObject customPrefab, string name, Material fallbackMat)
@@ -3074,8 +3442,16 @@ public class TycoonBoardManager : MonoBehaviour
 
     void PositionTokenOnTile(int playerIdx, int tileIdx)
     {
-        if (playerTokens[playerIdx] == null || board[tileIdx] == null || board[tileIdx].tileTransform == null) return;
-        Vector3 laneOffset = (playerIdx == 0) ? new Vector3(-0.012f, 0.018f, 0f) : new Vector3(0.012f, 0.018f, 0f);
+        if (playerIdx < 0 || playerIdx >= 4 || playerTokens[playerIdx] == null || board[tileIdx] == null || board[tileIdx].tileTransform == null) return;
+        Vector3 laneOffset;
+        switch (playerIdx)
+        {
+            case 0: laneOffset = new Vector3(-0.015f, 0.018f, -0.012f); break;
+            case 1: laneOffset = new Vector3( 0.015f, 0.018f, -0.012f); break;
+            case 2: laneOffset = new Vector3(-0.015f, 0.018f,  0.012f); break;
+            case 3: laneOffset = new Vector3( 0.015f, 0.018f,  0.012f); break;
+            default: laneOffset = Vector3.up * 0.018f; break;
+        }
         playerTokens[playerIdx].localPosition = board[tileIdx].tileTransform.localPosition + laneOffset;
         playerTokens[playerIdx].localRotation = GetClockwiseTravelRotation(tileIdx);
     }
@@ -3168,7 +3544,11 @@ public class TycoonBoardManager : MonoBehaviour
         {
             int nextTile = (playerPos[playerIdx] + 1) % 40;
             Vector3 startLocal = playerTokens[playerIdx].localPosition;
-            Vector3 laneOffset = (playerIdx == 0) ? new Vector3(-0.012f, 0.018f, 0f) : new Vector3(0.012f, 0.018f, 0f);
+            Vector3 laneOffset = Vector3.zero;
+            if (playerIdx == 0) laneOffset = new Vector3(-0.015f, 0.018f, -0.012f);
+            else if (playerIdx == 1) laneOffset = new Vector3(0.015f, 0.018f, -0.012f);
+            else if (playerIdx == 2) laneOffset = new Vector3(-0.015f, 0.018f, 0.012f);
+            else if (playerIdx == 3) laneOffset = new Vector3(0.015f, 0.018f, 0.012f);
             Vector3 endLocal = board[nextTile].tileTransform.localPosition + laneOffset;
 
             Quaternion startRot = playerTokens[playerIdx].localRotation;
@@ -3197,7 +3577,7 @@ public class TycoonBoardManager : MonoBehaviour
                 playerCash[playerIdx] += goSalary;
                 PlaySFX(cashRegisterSound, procCashClip, 1.1f);
                 StartCoroutine(SpawnFlyingCoinsStream(board[0].tileTransform.position, playerTokens[playerIdx].position, 6));
-                RefreshDashboard($"PASSED GO! +${goSalary} SALARY", $"{(playerIdx == 0 ? "You" : "Mogul AI")} collected ${goSalary}.");
+                RefreshDashboard($"PASSED GO! +${goSalary} SALARY", $"{(playerIdx == 0 ? "You" : GetPlayerName(playerIdx))} collected ${goSalary}.");
             }
         }
     }
@@ -3205,7 +3585,7 @@ public class TycoonBoardManager : MonoBehaviour
     IEnumerator EvaluateTileLanding(int playerIdx, bool rolledDoubles)
     {
         BoardTile tile = board[playerPos[playerIdx]];
-        string who = (playerIdx == 0) ? "YOU" : "MOGUL AI";
+        string who = (playerIdx == 0) ? "YOU" : GetPlayerName(playerIdx).ToUpper();
 
         switch (tile.type)
         {
@@ -3220,7 +3600,7 @@ public class TycoonBoardManager : MonoBehaviour
                         if (playerCash[0] >= tile.price)
                         {
                             currentState = TurnState.BuyOrPassDecision;
-                            SetRivalReaction(AvatarMood.Thinking, $"Thinking about buying {tile.name}?");
+                            SetRivalReaction(1, AvatarMood.Thinking, $"Thinking about buying {tile.name}?");
                             RefreshDashboard(
                                 $"LANDED ON {tile.name} (${tile.price})",
                                 "Right Pinch to Distance-Pull the 3D Deed Crystal (or touch [BUY DEED]) | Left Pinch to Pass"
@@ -3234,9 +3614,10 @@ public class TycoonBoardManager : MonoBehaviour
                     }
                     else
                     {
-                        if (playerCash[1] >= tile.price + 100)
+                        int buyReserve = (aiDifficulty == AIDifficulty.Casual) ? 200 : (aiDifficulty == AIDifficulty.Billionaire ? 30 : 100);
+                        if (playerCash[playerIdx] >= tile.price + buyReserve)
                         {
-                            PurchaseCurrentTile(1);
+                            PurchaseCurrentTile(playerIdx);
                             yield return new WaitForSeconds(0.9f);
                         }
                     }
@@ -3250,13 +3631,20 @@ public class TycoonBoardManager : MonoBehaviour
                     StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, playerTokens[tile.owner].position, 8));
 
                     if (playerIdx == 0)
-                        SetRivalReaction(AvatarMood.HappyCheer, $"Pay up! Thanks for the ${rent} rent on {tile.name}!");
+                    {
+                        SetRivalReaction(tile.owner, AvatarMood.HappyCheer, $"Pay up! Thanks for the ${rent} rent on {tile.name}!");
+                    }
                     else
-                        SetRivalReaction(AvatarMood.AngrySlam, $"Ugh! Paid you ${rent} rent on {tile.name}!");
+                    {
+                        if (tile.owner == 0)
+                            SetRivalReaction(playerIdx, AvatarMood.AngrySlam, $"Ugh! Paid you ${rent} rent on {tile.name}!");
+                        else
+                            SetRivalReaction(playerIdx, AvatarMood.Thinking, $"Paid ${rent} rent to {GetPlayerName(tile.owner)} on {tile.name}.");
+                    }
 
                     RefreshDashboard(
                         $"{who} PAID ${rent} RENT ON {tile.name}!",
-                        $"Paid to {(tile.owner == 0 ? "YOU" : "MOGUL AI")}. (Touch [TAKEOVER] on your turn to buy out AI properties!)"
+                        $"Paid to {(tile.owner == 0 ? "YOU" : GetPlayerName(tile.owner).ToUpper())}. (Touch [TAKEOVER] on your turn to buy out AI properties!)"
                     );
                     yield return new WaitForSeconds(1.1f);
                 }
@@ -3290,8 +3678,8 @@ public class TycoonBoardManager : MonoBehaviour
                     {
                         StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[playerIdx].position, 12));
                     }
-                    if (playerIdx == 0) SetRivalReaction(AvatarMood.AngrySlam, $"You swept the ${won} Free Parking Jackpot?!");
-                    else SetRivalReaction(AvatarMood.HappyCheer, $"Jackpot! +${won} is all mine!");
+                    if (playerIdx == 0) SetRivalReaction(1, AvatarMood.AngrySlam, $"You swept the ${won} Free Parking Jackpot?!");
+                    else SetRivalReaction(playerIdx, AvatarMood.HappyCheer, $"Jackpot! +${won} is all mine!");
                     RefreshDashboard($"{who} WON FREE PARKING JACKPOT!", $"Collected +${won} from the central gold vault!");
                 }
                 else
@@ -3333,7 +3721,7 @@ public class TycoonBoardManager : MonoBehaviour
 
     IEnumerator ExecuteAuthenticCardDraw(int playerIdx, bool isChance)
     {
-        string who = (playerIdx == 0) ? "YOU" : "MOGUL AI";
+        string who = (playerIdx == 0) ? "YOU" : GetPlayerName(playerIdx).ToUpper();
         string deckName = isChance ? "CHANCE DIRECTIVE" : "COMMUNITY CHEST";
         Color deckColor = isChance ? new Color(0.95f, 0.50f, 0.12f) : new Color(0.18f, 0.62f, 0.95f);
 
@@ -3360,13 +3748,19 @@ public class TycoonBoardManager : MonoBehaviour
                 break;
 
             case 2:
-                int other = 1 - playerIdx;
-                playerCash[playerIdx] -= 50;
-                playerCash[other] += 50;
+                for (int other = 0; other < activePlayerCount; other++)
+                {
+                    if (other != playerIdx && !isBankrupt[other])
+                    {
+                        playerCash[playerIdx] -= 50;
+                        playerCash[other] += 50;
+                        if (playerTokens[playerIdx] != null && playerTokens[other] != null)
+                            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, playerTokens[other].position, 5));
+                    }
+                }
                 PlaySFX(cashRegisterSound, procCashClip, 0.9f);
-                StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, playerTokens[other].position, 5));
-                ShowSpecialEventCard(deckName, "ELECTED CHAIRMAN OF THE BOARD!\nPay rival mogul $50.", deckColor);
-                RefreshDashboard($"{who}: CHAIRMAN OF THE BOARD", $"Paid $50 to {(other == 0 ? "YOU" : "MOGUL AI")}.");
+                ShowSpecialEventCard(deckName, "ELECTED CHAIRMAN OF THE BOARD!\nPay each rival mogul $50.", deckColor);
+                RefreshDashboard($"{who}: CHAIRMAN OF THE BOARD", "Paid $50 dividend to rival moguls.");
                 break;
 
             case 3:
@@ -3425,7 +3819,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
 
         RefreshDashboard(
-            $"{(playerIdx == 0 ? "YOU" : "MOGUL AI")} BOUGHT {tile.name} (${tile.price})!",
+            $"{GetPlayerName(playerIdx).ToUpper()} BOUGHT {tile.name} (${tile.price})!",
             "Tile claimed & Level 1 structure erected! Touch [BUILD (U)] on your turn to upgrade."
         );
 
@@ -3671,31 +4065,76 @@ public class TycoonBoardManager : MonoBehaviour
         PositionTokenOnTile(playerIdx, 10);
     }
 
+    void EliminatePlayerForBankruptcy(int p)
+    {
+        isBankrupt[p] = true;
+        if (playerTokens[p] != null) playerTokens[p].SetActive(false);
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null && board[i].owner == p)
+            {
+                board[i].owner = -1;
+                board[i].buildingLevel = 0;
+                board[i].isMortgaged = false;
+                if (board[i].ownershipBadge != null) Destroy(board[i].ownershipBadge);
+                if (board[i].spawnedBuilding != null) Destroy(board[i].spawnedBuilding);
+                if (board[i].tileRenderer != null)
+                {
+                    board[i].tileRenderer.material = CreateColoredMaterial(GetOfficialColor(board[i]), 0.85f);
+                }
+            }
+        }
+
+        RebuildMonopolySynergyBeams();
+        SetRivalReaction(p, AvatarMood.AngrySlam, "My empire has collapsed! I am completely bankrupt...", 4.0f);
+        RefreshDashboard($"{GetPlayerName(p).ToUpper()} IS BANKRUPT!", $"{GetPlayerName(p)} has been eliminated from the boardroom match!");
+        UpdateLiveHUDStats();
+    }
+
+    bool CheckAllRivalsBankrupt()
+    {
+        for (int a = 1; a < activePlayerCount; a++)
+        {
+            if (!isBankrupt[a]) return false;
+        }
+        return true;
+    }
+
     IEnumerator EndPlayerTurn(bool playerRolledDoubles)
     {
-        if (playerCash[1] < 0)
-        {
-            AttemptEmergencyBankruptcyLiquidation(1);
-        }
         if (playerCash[0] < 0)
         {
             AttemptEmergencyBankruptcyLiquidation(0);
+            if (playerCash[0] < 0)
+            {
+                SetRivalReaction(1, AvatarMood.HappyCheer, "Look who's bankrupt! The boardroom belongs to us!");
+                RefreshDashboard("BANKRUPTCY! AI RIVALS WIN!", "Touch [NEW GAME] or press N to launch a fresh match!");
+                currentState = TurnState.WaitingForRoll;
+                yield break;
+            }
         }
 
-        if (playerCash[1] < 0)
+        // Check pre-turn bankruptcy for active AI players
+        for (int a = 1; a < activePlayerCount; a++)
         {
-            SetRivalReaction(AvatarMood.AngrySlam, "I'm bankrupt! You win this empire!");
-            RefreshDashboard("VICTORY! MOGUL AI IS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire!");
+            if (!isBankrupt[a] && playerCash[a] < 0)
+            {
+                AttemptEmergencyBankruptcyLiquidation(a);
+                if (playerCash[a] < 0)
+                {
+                    EliminatePlayerForBankruptcy(a);
+                }
+            }
+        }
+
+        if (CheckAllRivalsBankrupt())
+        {
+            SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
+            RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
             SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
             currentState = TurnState.WaitingForRoll;
             yield break;
-        }
-        if (playerCash[0] < 0)
-        {
-            SetRivalReaction(AvatarMood.HappyCheer, "Look who's bankrupt! My empire reigns supreme!");
-            RefreshDashboard("BANKRUPTCY! MOGUL AI WINS!", "Touch [ROLL DICE] to start a fresh comeback round!");
-            playerCash[0] = 1500;
-            playerCash[1] = 1500;
         }
 
         if (playerRolledDoubles && !inJail[0])
@@ -3706,32 +4145,62 @@ public class TycoonBoardManager : MonoBehaviour
         }
 
         currentState = TurnState.AITurn;
-        SetRivalReaction(AvatarMood.Thinking, "My turn! Let's roll...");
-        yield return new WaitForSeconds(0.75f);
 
-        if (playerCash[1] > 500)
+        int buildThreshold = (aiDifficulty == AIDifficulty.Billionaire) ? 300 : ((aiDifficulty == AIDifficulty.Casual) ? 750 : 500);
+
+        for (int aiIdx = 1; aiIdx < activePlayerCount; aiIdx++)
         {
-            TryBuildChronologically(1);
-            yield return new WaitForSeconds(0.55f);
+            if (isBankrupt[aiIdx]) continue;
+
+            SetRivalReaction(aiIdx, AvatarMood.Thinking, $"{GetPlayerName(aiIdx)}: My turn! Analyzing the board...");
+            yield return new WaitForSeconds(0.65f);
+
+            // AI Upgrade phase
+            if (playerCash[aiIdx] > buildThreshold)
+            {
+                TryBuildChronologically(aiIdx);
+                yield return new WaitForSeconds(0.45f);
+            }
+
+            // AI Roll dice
+            int aiD1 = Random.Range(1, 7);
+            int aiD2 = Random.Range(1, 7);
+            lastDiceTotal = aiD1 + aiD2;
+            if (die1Transform != null) die1Transform.localRotation = GetFlatDieRotationForValue(aiD1);
+            if (die2Transform != null) die2Transform.localRotation = GetFlatDieRotationForValue(aiD2);
+            PlaySFX(diceRollSound, procDiceClip, 0.95f);
+
+            if (inJail[aiIdx])
+            {
+                inJail[aiIdx] = false;
+                playerCash[aiIdx] -= 50;
+                freeParkingJackpot += 50;
+            }
+
+            RefreshDashboard($"{GetPlayerName(aiIdx).ToUpper()} ROLLED [{aiD1}+{aiD2}={lastDiceTotal}]", $"{GetPlayerName(aiIdx)} is advancing {lastDiceTotal} steps clockwise...");
+            yield return StartCoroutine(MoveTokenSteps(aiIdx, lastDiceTotal));
+            yield return StartCoroutine(EvaluateTileLanding(aiIdx, false));
+
+            // Check if this AI went bankrupt after their turn
+            if (playerCash[aiIdx] < 0)
+            {
+                AttemptEmergencyBankruptcyLiquidation(aiIdx);
+                if (playerCash[aiIdx] < 0)
+                {
+                    EliminatePlayerForBankruptcy(aiIdx);
+                    if (CheckAllRivalsBankrupt())
+                    {
+                        SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
+                        RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
+                        SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
+                        currentState = TurnState.WaitingForRoll;
+                        yield break;
+                    }
+                }
+            }
+
+            yield return new WaitForSeconds(0.5f);
         }
-
-        int aiD1 = Random.Range(1, 7);
-        int aiD2 = Random.Range(1, 7);
-        lastDiceTotal = aiD1 + aiD2;
-        if (die1Transform != null) die1Transform.localRotation = GetFlatDieRotationForValue(aiD1);
-        if (die2Transform != null) die2Transform.localRotation = GetFlatDieRotationForValue(aiD2);
-        PlaySFX(diceRollSound, procDiceClip, 0.95f);
-
-        if (inJail[1])
-        {
-            inJail[1] = false;
-            playerCash[1] -= 50;
-            freeParkingJackpot += 50;
-        }
-
-        RefreshDashboard($"MOGUL AI ROLLED [{aiD1}+{aiD2}={lastDiceTotal}]", $"AI Rival is moving {lastDiceTotal} steps clockwise...");
-        yield return StartCoroutine(MoveTokenSteps(1, lastDiceTotal));
-        yield return StartCoroutine(EvaluateTileLanding(1, false));
 
         totalTurnsCompleted++;
         if (totalTurnsCompleted % 5 == 0)
@@ -3835,19 +4304,44 @@ public class TycoonBoardManager : MonoBehaviour
         GameObject gavel = Create3DGavel(deedCardHolder != null ? deedCardHolder.transform : transform);
 
         int currentBid = Mathf.Max(10, tile.price / 2);
-        int highestBidder = -1; // -1 = opening/no bidder yet, 0 = Player, 1 = AI
-        int aiMaxBid = tile.price + Random.Range(-30, 61);
-        aiMaxBid = Mathf.Min(aiMaxBid, playerCash[1]);
+        int highestBidder = -1; // -1 = opening/no bidder yet, 0 = Player, 1..3 = AI
+
+        int[] aiMaxBids = new int[4];
+        float[] nextAiBidTimes = new float[4];
+        bool[] aiDroppedOut = new bool[4];
+
+        for (int a = 1; a < activePlayerCount; a++)
+        {
+            if (isBankrupt[a])
+            {
+                aiDroppedOut[a] = true;
+                continue;
+            }
+
+            float multiplier = 1.1f;
+            if (aiDifficulty == AIDifficulty.Billionaire) multiplier = 1.35f;
+            else if (aiDifficulty == AIDifficulty.Casual) multiplier = 0.90f;
+
+            // Distinct AI Personalities
+            if (a == 1) multiplier += 0.12f; // Mogul Alpha: Aggressive Shark bids high
+            else if (a == 2 && (tile.type == TileType.Railroad || tile.type == TileType.Utility || tile.colorGroup == 1 || tile.colorGroup == 3))
+                multiplier += 0.25f; // Baroness Beta: Tech & Transit Tycoon loves Railroads/Utilities/Cyan/Orange
+            else if (a == 3)
+                multiplier -= 0.10f; // Titan Gamma: Conservative Banker
+
+            int maxBid = (int)(tile.price * multiplier) + Random.Range(-15, 25);
+            aiMaxBids[a] = Mathf.Min(maxBid, playerCash[a]);
+            nextAiBidTimes[a] = Time.time + 0.8f + (a * 0.35f) + Random.Range(0f, 0.4f);
+            aiDroppedOut[a] = false;
+        }
 
         float timer = 6.0f;
-        float nextAiBidTime = Time.time + 1.1f;
         bool playerDroppedOut = false;
-        bool aiDroppedOut = false;
         auctionPlayerBidFlag = false;
         auctionPlayerDropFlag = false;
 
         PlaySFX(cashRegisterSound, procCashClip, 1.3f);
-        SetRivalReaction(AvatarMood.Thinking, $"An auction for {tile.name}! Opening bid: ${currentBid}. Let's bid!");
+        SetRivalReaction(1, AvatarMood.Thinking, $"An auction for {tile.name}! Opening bid: ${currentBid}. Let's bid!");
 
         while (timer > 0f)
         {
@@ -3859,9 +4353,8 @@ public class TycoonBoardManager : MonoBehaviour
                 {
                     auctionPlayerDropFlag = false;
                     playerDroppedOut = true;
-                    RefreshDashboard("AUCTION: YOU DROPPED OUT!", "You conceded the auction to Rival Mogul.");
+                    RefreshDashboard("AUCTION: YOU DROPPED OUT!", "You conceded the auction to Rival Moguls.");
                     PlaySFX(tokenMoveSound, procStepClip, 0.8f);
-                    break;
                 }
                 if (auctionPlayerBidFlag)
                 {
@@ -3874,7 +4367,7 @@ public class TycoonBoardManager : MonoBehaviour
                         timer = Mathf.Max(timer, 2.5f);
                         PlaySFX(cashRegisterSound, procCashClip, 1.2f);
                         StartCoroutine(AnimateGavelStrike(gavel));
-                        SetRivalReaction(AvatarMood.Neutral, $"You raised to ${currentBid}?! Let me calculate...");
+                        SetRivalReaction(1, AvatarMood.Neutral, $"You raised to ${currentBid}?! Let me calculate...");
                     }
                     else
                     {
@@ -3883,28 +4376,31 @@ public class TycoonBoardManager : MonoBehaviour
                 }
             }
 
-            if (!aiDroppedOut && Time.time >= nextAiBidTime && highestBidder != 1)
+            for (int a = 1; a < activePlayerCount; a++)
             {
-                int nextAiBid = (highestBidder == -1) ? currentBid : currentBid + 20;
-                if (nextAiBid <= aiMaxBid && playerCash[1] >= nextAiBid)
+                if (!aiDroppedOut[a] && Time.time >= nextAiBidTimes[a] && highestBidder != a)
                 {
-                    currentBid = nextAiBid;
-                    highestBidder = 1;
-                    nextAiBidTime = Time.time + 1.1f + Random.Range(0f, 0.4f);
-                    timer = Mathf.Max(timer, 2.5f);
-                    PlaySFX(diceRollSound, procDiceClip, 1.2f);
-                    StartCoroutine(AnimateGavelStrike(gavel));
-                    string taunt = (Random.value > 0.5f) ? $"I counter-bid ${currentBid}!" : $"Outbid! It's mine for ${currentBid}!";
-                    SetRivalReaction(AvatarMood.HappyCheer, taunt);
-                }
-                else
-                {
-                    aiDroppedOut = true;
-                    SetRivalReaction(AvatarMood.AngrySlam, $"Too steep for my spreadsheet! Take it at ${currentBid}.");
+                    int nextAiBid = (highestBidder == -1) ? currentBid : currentBid + 20;
+                    if (nextAiBid <= aiMaxBids[a] && playerCash[a] >= nextAiBid)
+                    {
+                        currentBid = nextAiBid;
+                        highestBidder = a;
+                        nextAiBidTimes[a] = Time.time + 1.2f + Random.Range(0f, 0.4f);
+                        timer = Mathf.Max(timer, 2.5f);
+                        PlaySFX(diceRollSound, procDiceClip, 1.2f);
+                        StartCoroutine(AnimateGavelStrike(gavel));
+                        string taunt = (Random.value > 0.5f) ? $"{GetPlayerName(a)} bids ${currentBid}!" : $"Outbid! It's mine for ${currentBid}!";
+                        SetRivalReaction(a, AvatarMood.HappyCheer, taunt);
+                    }
+                    else
+                    {
+                        aiDroppedOut[a] = true;
+                        SetRivalReaction(a, AvatarMood.AngrySlam, $"Too steep for {GetPlayerName(a)}! Dropping out at ${currentBid}.");
+                    }
                 }
             }
 
-            string bidderName = (highestBidder == 0) ? "YOU" : (highestBidder == 1 ? "MOGUL AI" : "NONE");
+            string bidderName = (highestBidder == 0) ? "YOU" : (highestBidder > 0 ? GetPlayerName(highestBidder).ToUpper() : "NONE");
             RefreshDashboard(
                 $"AUCTION: {tile.name.ToUpper()} — HIGH BID: ${currentBid} ({bidderName})",
                 $"Timer: {timer:F1}s | Right-Pinch/B: +$20 Raise | Left-Pinch/P: Drop Out"
@@ -3940,19 +4436,19 @@ public class TycoonBoardManager : MonoBehaviour
             PlaySFX(cashRegisterSound, procCashClip, 1.25f);
             StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, tile.tileTransform.position, 6));
             RefreshDashboard($"AUCTION WON BY YOU FOR ${currentBid}!", $"Acquired {tile.name} with Level 1 Building at auction!");
-            SetRivalReaction(AvatarMood.AngrySlam, $"You sniped {tile.name} for ${currentBid}... well played.");
+            SetRivalReaction(1, AvatarMood.AngrySlam, $"You sniped {tile.name} for ${currentBid}... well played.");
         }
-        else if (highestBidder == 1)
+        else if (highestBidder > 0)
         {
-            playerCash[1] -= currentBid;
-            tile.owner = 1;
+            playerCash[highestBidder] -= currentBid;
+            tile.owner = highestBidder;
             if (tile.type == TileType.Property && tile.buildingLevel == 0) tile.buildingLevel = 1;
-            ApplyTileOwnershipVisuals(tile, 1);
+            ApplyTileOwnershipVisuals(tile, highestBidder);
             RebuildMonopolySynergyBeams();
             PlaySFX(cashRegisterSound, procCashClip, 1.25f);
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[1].position, tile.tileTransform.position, 6));
-            RefreshDashboard($"AUCTION WON BY MOGUL AI FOR ${currentBid}!", $"Mogul AI claimed {tile.name} at auction!");
-            SetRivalReaction(AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
+            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[highestBidder].position, tile.tileTransform.position, 6));
+            RefreshDashboard($"AUCTION WON BY {GetPlayerName(highestBidder).ToUpper()} FOR ${currentBid}!", $"{GetPlayerName(highestBidder)} claimed {tile.name} at auction!");
+            SetRivalReaction(highestBidder, AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
         }
         else
         {
@@ -3973,7 +4469,7 @@ public class TycoonBoardManager : MonoBehaviour
     void ApplyTileOwnershipVisuals(BoardTile tile, int playerIdx)
     {
         if (tile == null || tile.tileTransform == null) return;
-        Color tileTint = (playerIdx == 0) ? new Color(0.18f, 0.85f, 0.45f) : new Color(0.85f, 0.30f, 0.55f);
+        Color tileTint = GetPlayerColor(playerIdx);
         if (tile.isMortgaged)
         {
             tileTint = new Color(0.48f, 0.12f, 0.16f);
@@ -4003,10 +4499,17 @@ public class TycoonBoardManager : MonoBehaviour
     public void SaveGameState()
     {
         PlayerPrefs.SetInt("Tycoon_HasSave", 1);
-        PlayerPrefs.SetInt("Tycoon_Cash_P0", playerCash[0]);
-        PlayerPrefs.SetInt("Tycoon_Cash_P1", playerCash[1]);
-        PlayerPrefs.SetInt("Tycoon_Pos_P0", playerPos[0]);
-        PlayerPrefs.SetInt("Tycoon_Pos_P1", playerPos[1]);
+        PlayerPrefs.SetInt("Tycoon_ActivePlayers", activePlayerCount);
+        PlayerPrefs.SetInt("Tycoon_AIDifficulty", (int)aiDifficulty);
+        PlayerPrefs.SetInt("Tycoon_StartCashConfig", startingCashConfig);
+
+        for (int p = 0; p < 4; p++)
+        {
+            PlayerPrefs.SetInt($"Tycoon_Cash_P{p}", playerCash[p]);
+            PlayerPrefs.SetInt($"Tycoon_Pos_P{p}", playerPos[p]);
+            PlayerPrefs.SetInt($"Tycoon_Bankrupt_P{p}", isBankrupt[p] ? 1 : 0);
+        }
+
         PlayerPrefs.SetInt("Tycoon_Jackpot", freeParkingJackpot);
         PlayerPrefs.SetInt("Tycoon_MarketCycle", (int)currentMarketCycle);
         PlayerPrefs.SetInt("Tycoon_TotalTurns", totalTurnsCompleted);
@@ -4028,18 +4531,30 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (PlayerPrefs.GetInt("Tycoon_HasSave", 0) != 1) return;
 
-        playerCash[0] = PlayerPrefs.GetInt("Tycoon_Cash_P0", 1500);
-        playerCash[1] = PlayerPrefs.GetInt("Tycoon_Cash_P1", 1500);
-        playerPos[0] = PlayerPrefs.GetInt("Tycoon_Pos_P0", 0);
-        playerPos[1] = PlayerPrefs.GetInt("Tycoon_Pos_P1", 0);
+        activePlayerCount = PlayerPrefs.GetInt("Tycoon_ActivePlayers", 4);
+        aiDifficulty = (AIDifficulty)PlayerPrefs.GetInt("Tycoon_AIDifficulty", 0);
+        startingCashConfig = PlayerPrefs.GetInt("Tycoon_StartCashConfig", 1500);
+
+        for (int p = 0; p < 4; p++)
+        {
+            playerCash[p] = PlayerPrefs.GetInt($"Tycoon_Cash_P{p}", startingCashConfig);
+            playerPos[p] = PlayerPrefs.GetInt($"Tycoon_Pos_P{p}", 0);
+            isBankrupt[p] = (PlayerPrefs.GetInt($"Tycoon_Bankrupt_P{p}", 0) == 1);
+            PositionTokenOnTile(p, playerPos[p]);
+        }
+
+        UpdateActivePlayerVisibilities();
+
+        if (startMenuHolder != null)
+        {
+            startMenuHolder.SetActive(false);
+        }
+
         freeParkingJackpot = PlayerPrefs.GetInt("Tycoon_Jackpot", 100);
         currentMarketCycle = (MarketCycle)PlayerPrefs.GetInt("Tycoon_MarketCycle", 0);
         totalTurnsCompleted = PlayerPrefs.GetInt("Tycoon_TotalTurns", 0);
         currentBoardScale = PlayerPrefs.GetFloat("Tycoon_BoardScale", 0.85f);
         transform.localScale = Vector3.one * currentBoardScale;
-
-        PositionTokenOnTile(0, playerPos[0]);
-        PositionTokenOnTile(1, playerPos[1]);
 
         for (int i = 0; i < 40; i++)
         {
@@ -4071,16 +4586,18 @@ public class TycoonBoardManager : MonoBehaviour
         PlayerPrefs.DeleteAll();
         PlayerPrefs.Save();
 
-        playerCash[0] = 1500;
-        playerCash[1] = 1500;
-        playerPos[0] = 0;
-        playerPos[1] = 0;
+        for (int p = 0; p < 4; p++)
+        {
+            playerCash[p] = startingCashConfig;
+            playerPos[p] = 0;
+            isBankrupt[p] = false;
+            inJail[p] = false;
+            PositionTokenOnTile(p, 0);
+        }
+
         freeParkingJackpot = 100;
         currentMarketCycle = MarketCycle.Standard;
         totalTurnsCompleted = 0;
-
-        PositionTokenOnTile(0, 0);
-        PositionTokenOnTile(1, 0);
 
         for (int i = 0; i < 40; i++)
         {
@@ -4104,12 +4621,12 @@ public class TycoonBoardManager : MonoBehaviour
         HideDeedCard();
         UpdateLiveHUDStats();
         PlaySFX(cashRegisterSound, procCashClip, 1.0f);
-        RefreshDashboard("MATCH RESET (NEW GAME)", "Fresh $1500 match started! Distance-grab dice to roll.");
-        SetRivalReaction(AvatarMood.Thinking, "A fresh board! Let's see who builds the empire this time.");
+        ShowStartMenu();
     }
 
     int CalculatePlayerNetWorth(int playerIdx)
     {
+        if (playerIdx < 0 || playerIdx >= 4) return 0;
         int net = playerCash[playerIdx];
         for (int i = 0; i < 40; i++)
         {
@@ -4163,7 +4680,6 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (dashboardStatsTMP == null) return;
         int net0 = CalculatePlayerNetWorth(0);
-        int net1 = CalculatePlayerNetWorth(1);
         string monopolySummary = GetMonopolyProgressSummary(0);
         string cycleBadge = "";
         switch (currentMarketCycle)
@@ -4173,15 +4689,34 @@ public class TycoonBoardManager : MonoBehaviour
             case MarketCycle.TechIPOSurge: cycleBadge = "MARKET: TECH IPO (2.5x TRANSIT)"; break;
             default: cycleBadge = "MARKET: STANDARD"; break;
         }
-        dashboardStatsTMP.text = $"YOU: ${playerCash[0]} (NET: ${net0})  |  AI: ${playerCash[1]} (NET: ${net1})  |  POT: ${freeParkingJackpot}  |  {cycleBadge}\n{monopolySummary}";
+
+        string statsLine = $"YOU: ${playerCash[0]} (NET: ${net0})";
+        for (int p = 1; p < activePlayerCount; p++)
+        {
+            string shortName = (p == 1) ? "ALPHA" : (p == 2 ? "BETA" : "GAMMA");
+            int net = CalculatePlayerNetWorth(p);
+            if (isBankrupt[p]) statsLine += $" | {shortName}: [OUT]";
+            else statsLine += $" | {shortName}: ${playerCash[p]} (NET: ${net})";
+        }
+        statsLine += $" | POT: ${freeParkingJackpot} | {cycleBadge}\n{monopolySummary}";
+        dashboardStatsTMP.text = statsLine;
     }
 
     void RefreshDashboard(string eventHeadline, string promptLine)
     {
-        if (dashboardTitleTMP == null) return;
-        dashboardTitleTMP.text = $"YOU: ${playerCash[0]}  |  AI: ${playerCash[1]}  |  JACKPOT: ${freeParkingJackpot}";
-        dashboardBodyTMP.text = eventHeadline;
-        dashboardPromptTMP.text = promptLine;
+        if (dashboardTitleTMP != null)
+        {
+            string titleStr = $"YOU: ${playerCash[0]}";
+            for (int p = 1; p < activePlayerCount; p++)
+            {
+                string shortName = (p == 1) ? "ALPHA" : (p == 2 ? "BETA" : "GAMMA");
+                titleStr += isBankrupt[p] ? $" | {shortName}: [OUT]" : $" | {shortName}: ${playerCash[p]}";
+            }
+            titleStr += $" | JACKPOT: ${freeParkingJackpot}";
+            dashboardTitleTMP.text = titleStr;
+        }
+        if (dashboardBodyTMP != null) dashboardBodyTMP.text = eventHeadline;
+        if (dashboardPromptTMP != null) dashboardPromptTMP.text = promptLine;
         UpdateLiveHUDStats();
     }
 
