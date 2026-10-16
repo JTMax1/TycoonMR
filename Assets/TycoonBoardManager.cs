@@ -15,9 +15,26 @@ public class TycoonBoardManager : MonoBehaviour
 
     [Header("2. Custom Player Vehicle & Rival Avatar Prefabs (Drag & Drop)")]
     public GameObject dicePrefab;
+    [Tooltip("Vehicle prefab for Player 0 (You - South)")]
     public GameObject playerTokenPrefab;
+    [Tooltip("Vehicle prefab for AI Rival 1 (Mogul Alpha - North)")]
     public GameObject aiRivalTokenPrefab;
+    [Tooltip("Vehicle prefab for AI Rival 2 (Baroness Beta - West)")]
+    public GameObject rival2TokenPrefab;
+    [Tooltip("Vehicle prefab for AI Rival 3 (Titan Gamma - East)")]
+    public GameObject rival3TokenPrefab;
+    [Tooltip("Optional list to drag & drop player vehicle prefabs (indexed P0..P3)")]
+    public List<GameObject> playerTokenPrefabs = new List<GameObject>();
+
+    [Space(8)]
+    [Tooltip("3D Avatar prefab for AI Rival 1 (Mogul Alpha - North)")]
     public GameObject rivalAvatarPrefab;
+    [Tooltip("3D Avatar prefab for AI Rival 2 (Baroness Beta - West)")]
+    public GameObject rival2AvatarPrefab;
+    [Tooltip("3D Avatar prefab for AI Rival 3 (Titan Gamma - East)")]
+    public GameObject rival3AvatarPrefab;
+    [Tooltip("List to drag & drop custom avatar prefabs for all active AI rivals")]
+    public List<GameObject> rivalAvatarPrefabs = new List<GameObject>();
 
     [Header("3. Chronological Building Prefab Holders (Levels 1 to 5)")]
     public GameObject level1HousePrefab;
@@ -1218,6 +1235,31 @@ public class TycoonBoardManager : MonoBehaviour
         UpdateActivePlayerVisibilities();
     }
 
+    GameObject GetAvatarPrefabForPlayer(int p)
+    {
+        if (p == 1)
+        {
+            if (rivalAvatarPrefab != null) return rivalAvatarPrefab;
+            if (rivalAvatarPrefabs != null && rivalAvatarPrefabs.Count > 0 && rivalAvatarPrefabs[0] != null) return rivalAvatarPrefabs[0];
+            return null;
+        }
+        if (p == 2)
+        {
+            if (rival2AvatarPrefab != null) return rival2AvatarPrefab;
+            if (rivalAvatarPrefabs != null && rivalAvatarPrefabs.Count > 1 && rivalAvatarPrefabs[1] != null) return rivalAvatarPrefabs[1];
+            if (rivalAvatarPrefabs != null && rivalAvatarPrefabs.Count > 0 && rivalAvatarPrefabs[0] != null) return rivalAvatarPrefabs[0];
+            return rivalAvatarPrefab;
+        }
+        if (p == 3)
+        {
+            if (rival3AvatarPrefab != null) return rival3AvatarPrefab;
+            if (rivalAvatarPrefabs != null && rivalAvatarPrefabs.Count > 2 && rivalAvatarPrefabs[2] != null) return rivalAvatarPrefabs[2];
+            if (rivalAvatarPrefabs != null && rivalAvatarPrefabs.Count > 0 && rivalAvatarPrefabs[0] != null) return rivalAvatarPrefabs[0];
+            return rivalAvatarPrefab;
+        }
+        return null;
+    }
+
     void CreateSingleAIAvatar(int p, Vector3 localPos, Quaternion localRot)
     {
         string aiName = GetPlayerName(p);
@@ -1229,9 +1271,10 @@ public class TycoonBoardManager : MonoBehaviour
         avatarHolder.transform.localRotation = localRot;
         rivalAvatarRoots[p] = avatarHolder.transform;
 
-        if (p == 1 && rivalAvatarPrefab != null && rivalAvatarPrefab.GetComponent<OVRCameraRig>() == null)
+        GameObject customAvatarPrefab = GetAvatarPrefabForPlayer(p);
+        if (customAvatarPrefab != null && customAvatarPrefab.GetComponent<OVRCameraRig>() == null)
         {
-            GameObject customModel = Instantiate(rivalAvatarPrefab, avatarHolder.transform);
+            GameObject customModel = Instantiate(customAvatarPrefab, avatarHolder.transform);
             StripRoguePhysicsFromImportedPrefab(customModel);
             customModel.transform.localPosition = Vector3.zero;
             NormalizePrefabSize(customModel, 0.35f);
@@ -3374,12 +3417,43 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    GameObject GetTokenPrefabForPlayer(int p)
+    {
+        if (p == 0)
+        {
+            if (playerTokenPrefab != null) return playerTokenPrefab;
+            if (playerTokenPrefabs != null && playerTokenPrefabs.Count > 0 && playerTokenPrefabs[0] != null) return playerTokenPrefabs[0];
+            return null;
+        }
+        if (p == 1)
+        {
+            if (aiRivalTokenPrefab != null) return aiRivalTokenPrefab;
+            if (playerTokenPrefabs != null && playerTokenPrefabs.Count > 1 && playerTokenPrefabs[1] != null) return playerTokenPrefabs[1];
+            return null;
+        }
+        if (p == 2)
+        {
+            if (rival2TokenPrefab != null) return rival2TokenPrefab;
+            if (playerTokenPrefabs != null && playerTokenPrefabs.Count > 2 && playerTokenPrefabs[2] != null) return playerTokenPrefabs[2];
+            if (ambientTrafficCar1Prefab != null) return ambientTrafficCar1Prefab;
+            return aiRivalTokenPrefab;
+        }
+        if (p == 3)
+        {
+            if (rival3TokenPrefab != null) return rival3TokenPrefab;
+            if (playerTokenPrefabs != null && playerTokenPrefabs.Count > 3 && playerTokenPrefabs[3] != null) return playerTokenPrefabs[3];
+            if (ambientTrafficCar2Prefab != null) return ambientTrafficCar2Prefab;
+            return playerTokenPrefab;
+        }
+        return null;
+    }
+
     void CreatePlayerTokens()
     {
-        playerTokens[0] = SpawnPlayerTokenInstance(0, playerTokenPrefab, "Player_Vehicle_Token", CreateColoredMaterial(GetPlayerColor(0), 0.9f));
-        playerTokens[1] = SpawnPlayerTokenInstance(1, aiRivalTokenPrefab, "AIRival1_Alpha_Token", CreateColoredMaterial(GetPlayerColor(1), 0.9f));
-        playerTokens[2] = SpawnPlayerTokenInstance(2, ambientTrafficCar1Prefab != null ? ambientTrafficCar1Prefab : aiRivalTokenPrefab, "AIRival2_Beta_Token", CreateColoredMaterial(GetPlayerColor(2), 0.9f));
-        playerTokens[3] = SpawnPlayerTokenInstance(3, ambientTrafficCar2Prefab != null ? ambientTrafficCar2Prefab : playerTokenPrefab, "AIRival3_Gamma_Token", CreateColoredMaterial(GetPlayerColor(3), 0.9f));
+        playerTokens[0] = SpawnPlayerTokenInstance(0, GetTokenPrefabForPlayer(0), "Player_Vehicle_Token", CreateColoredMaterial(GetPlayerColor(0), 0.9f));
+        playerTokens[1] = SpawnPlayerTokenInstance(1, GetTokenPrefabForPlayer(1), "AIRival1_Alpha_Token", CreateColoredMaterial(GetPlayerColor(1), 0.9f));
+        playerTokens[2] = SpawnPlayerTokenInstance(2, GetTokenPrefabForPlayer(2), "AIRival2_Beta_Token", CreateColoredMaterial(GetPlayerColor(2), 0.9f));
+        playerTokens[3] = SpawnPlayerTokenInstance(3, GetTokenPrefabForPlayer(3), "AIRival3_Gamma_Token", CreateColoredMaterial(GetPlayerColor(3), 0.9f));
 
         for (int p = 0; p < 4; p++)
         {
@@ -4068,7 +4142,7 @@ public class TycoonBoardManager : MonoBehaviour
     void EliminatePlayerForBankruptcy(int p)
     {
         isBankrupt[p] = true;
-        if (playerTokens[p] != null) playerTokens[p].SetActive(false);
+        if (playerTokens[p] != null) playerTokens[p].gameObject.SetActive(false);
 
         for (int i = 0; i < 40; i++)
         {
