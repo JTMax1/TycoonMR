@@ -85,9 +85,11 @@ public class TycoonBoardManager : MonoBehaviour
     private PhysicalThrowDie physDie1;
     private PhysicalThrowDie physDie2;
     private bool isPlayerHoldingDice = false;
+    private bool isGrabbingDiceWithRight = true;
 
     private GameObject grabbableDeedCrystal;
     private bool isHoldingDeedCrystal = false;
+    private bool isHoldingDeedWithRight = true;
 
     private Transform rivalAvatarRoot;
     private Transform rivalHeadTransform;
@@ -377,6 +379,35 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    // Determines if a transform belongs to the Left hand (-1), Right hand (1), or Unknown (0)
+    // by inspecting GameObject names up the entire parent hierarchy and checking for OVRHand.
+    private int DetermineHierarchyHandedness(Transform targetTransform)
+    {
+        if (targetTransform == null) return 0;
+
+        Transform curr = targetTransform;
+        while (curr != null)
+        {
+            string n = curr.name.ToLowerInvariant();
+            bool hasLeft = n.Contains("left") || n.Contains("lhand") || n.Contains("_l_") || n.EndsWith("_l") || n.StartsWith("l_") || n.Contains("hand_l");
+            bool hasRight = n.Contains("right") || n.Contains("rhand") || n.Contains("_r_") || n.EndsWith("_r") || n.StartsWith("r_") || n.Contains("hand_r");
+
+            if (hasLeft && !hasRight) return -1;
+            if (hasRight && !hasLeft) return 1;
+
+            curr = curr.parent;
+        }
+
+        OVRHand ovr = targetTransform.GetComponentInParent<OVRHand>();
+        if (ovr != null)
+        {
+            if (ovr.GetHand() == OVRPlugin.Hand.HandLeft) return -1;
+            if (ovr.GetHand() == OVRPlugin.Hand.HandRight) return 1;
+        }
+
+        return 0;
+    }
+
     // --- READS BOTH META INTERACTIONS RIG (`OVRHand` / `PokeInteractor`) AND HARDWARE `OVRPlugin` ---
     void ReadMetaISDKHands(out bool rightPinchDown, out bool leftPinchDown, out bool isRightPinching, out bool isLeftPinching)
     {
@@ -400,21 +431,37 @@ public class TycoonBoardManager : MonoBehaviour
             for (int i = 0; i < scenePokeInteractors.Length; i++)
             {
                 PokeInteractor pi = scenePokeInteractors[i];
-                if (pi == null || !pi.gameObject.activeInHierarchy) continue;
+                if (pi == null || !pi.gameObject.activeInHierarchy || !pi.enabled) continue;
 
                 // PokeInteractor.Origin is the exact index fingertip point computed by Meta XR Interaction SDK!
                 Vector3 tipPos = pi.Origin != Vector3.zero ? pi.Origin : pi.transform.position;
                 if (tipPos.sqrMagnitude < 0.0001f) continue;
 
-                if (i == 0)
+                int handedness = DetermineHierarchyHandedness(pi.transform);
+                if (handedness == -1)
                 {
                     leftHandWorldPos = tipPos;
                     isLeftHandTracked = true;
                 }
-                else
+                else if (handedness == 1)
                 {
                     rightHandWorldPos = tipPos;
                     isRightHandTracked = true;
+                }
+                else
+                {
+                    // Fallback to camera relative horizontal position if hierarchy name is indeterminate
+                    Vector3 camLocal = Camera.main != null ? Camera.main.transform.InverseTransformPoint(tipPos) : tipPos;
+                    if (camLocal.x < 0f)
+                    {
+                        leftHandWorldPos = tipPos;
+                        isLeftHandTracked = true;
+                    }
+                    else
+                    {
+                        rightHandWorldPos = tipPos;
+                        isRightHandTracked = true;
+                    }
                 }
             }
         }
@@ -435,15 +482,20 @@ public class TycoonBoardManager : MonoBehaviour
                                 hand.GetFingerPinchStrength(OVRHand.HandFinger.Index) > 0.65f;
 
                 Vector3 ptrPos = hand.PointerPose != null ? hand.PointerPose.position : hand.transform.position;
-                bool isLeft = hand.name.ToLower().Contains("left");
+                int handedness = DetermineHierarchyHandedness(hand.transform);
+                if (handedness == 0)
+                {
+                    if (hand.GetHand() == OVRPlugin.Hand.HandLeft) handedness = -1;
+                    else if (hand.GetHand() == OVRPlugin.Hand.HandRight) handedness = 1;
+                }
 
-                if (isLeft)
+                if (handedness == -1)
                 {
                     isLeftHandTracked = true;
                     isLeftPinching |= pinching;
                     if (leftHandWorldPos.y < -50f) leftHandWorldPos = ptrPos;
                 }
-                else
+                else if (handedness == 1)
                 {
                     isRightHandTracked = true;
                     isRightPinching |= pinching;
@@ -452,15 +504,13 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
 
-        // 3. Fallback to OVRPlugin if OVRHand component wasn't found yet
-        if (!isLeftHandTracked && !isRightHandTracked)
+        // 3. Fallback to OVRPlugin if either hand wasn't tracked by ISDK / OVRHand
+        Transform refSpace = Camera.main != null && Camera.main.transform.parent != null ? Camera.main.transform.parent : transform;
+        if (!isRightHandTracked)
         {
             try
             {
-                OVRPlugin.HandState leftState = new OVRPlugin.HandState();
                 OVRPlugin.HandState rightState = new OVRPlugin.HandState();
-                Transform refSpace = Camera.main != null && Camera.main.transform.parent != null ? Camera.main.transform.parent : transform;
-
                 if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandRight, ref rightState) &&
                     (rightState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
                 {
@@ -469,7 +519,15 @@ public class TycoonBoardManager : MonoBehaviour
                     rightHandWorldPos = refSpace.TransformPoint(wristLocal);
                     isRightPinching = (rightState.Pinches & OVRPlugin.HandFingerPinch.Index) != 0;
                 }
+            }
+            catch { }
+        }
 
+        if (!isLeftHandTracked)
+        {
+            try
+            {
+                OVRPlugin.HandState leftState = new OVRPlugin.HandState();
                 if (OVRPlugin.GetHandState(OVRPlugin.Step.Render, OVRPlugin.Hand.HandLeft, ref leftState) &&
                     (leftState.Status & OVRPlugin.HandStatus.HandTracked) != 0)
                 {
@@ -648,35 +706,81 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (currentState != TurnState.WaitingForRoll || physDie1 == null || physDie2 == null) return;
 
-        bool usingRight = rPinchDown || rPinchHeld;
-        Vector3 activeHandPos = usingRight ? rightHandWorldPos : leftHandWorldPos;
-        if (activeHandGrabTransform != null) activeHandGrabTransform.position = activeHandPos;
-
-        // Also check if Meta's native Grabbable component on the dice was grabbed directly by the Interactions Rig!
-        if (!isPlayerHoldingDice && (physDie1.isHeldByPlayer || physDie2.isHeldByPlayer))
+        // 1. When not currently holding dice, check if a grab has been initiated
+        if (!isPlayerHoldingDice)
         {
-            isPlayerHoldingDice = true;
-            PlaySFX(diceRollSound, procDiceClip, 1.1f);
-            RefreshDashboard("HOLDING 3D DICE IN HAND!", "Shake your hand and release your pinch to THROW the dice onto the board!");
-            return;
-        }
-
-        // Distance Grab (Pull Interactable To Hand): Pinch from up to 1.25 meters away to magnet-pull the dice into your hand!
-        if (!isPlayerHoldingDice && (rPinchDown || lPinchDown))
-        {
-            float distToDice = Vector3.Distance(activeHandPos, die1Transform.position);
-            if (distToDice < 1.25f && activeHandGrabTransform != null)
+            // Direct touch / native Grabbable grab check
+            if (physDie1.isHeldByPlayer || physDie2.isHeldByPlayer)
             {
                 isPlayerHoldingDice = true;
+                float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, die1Transform.position) : 99f;
+                float distL = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(leftHandWorldPos, die1Transform.position) : 99f;
+                isGrabbingDiceWithRight = (distR <= distL);
+
+                Vector3 grabPos = isGrabbingDiceWithRight ? rightHandWorldPos : leftHandWorldPos;
+                if (activeHandGrabTransform != null && grabPos.y > -50f)
+                {
+                    activeHandGrabTransform.position = grabPos;
+                }
+
                 physDie1.BeginHandGrab(activeHandGrabTransform, new Vector3(-0.028f, 0f, 0f));
                 physDie2.BeginHandGrab(activeHandGrabTransform, new Vector3(0.028f, 0f, 0f));
-                PlaySFX(diceRollSound, procDiceClip, 1.15f);
-                RefreshDashboard("DISTANCE-PULLED 3D DICE TO HAND!", "Shake your hand and release your pinch to THROW the dice onto Central Park!");
+
+                PlaySFX(diceRollSound, procDiceClip, 1.1f);
+                RefreshDashboard("HOLDING 3D DICE IN " + (isGrabbingDiceWithRight ? "RIGHT" : "LEFT") + " HAND!", "Shake your hand and release your pinch to THROW the dice onto the board!");
+                return;
+            }
+
+            // Distance grab pinch check
+            if (rPinchDown || lPinchDown)
+            {
+                float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, die1Transform.position) : 99f;
+                float distL = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(leftHandWorldPos, die1Transform.position) : 99f;
+
+                bool grabRight;
+                if (rPinchDown && lPinchDown)
+                {
+                    grabRight = (distR <= distL);
+                }
+                else if (rPinchDown)
+                {
+                    grabRight = true;
+                }
+                else
+                {
+                    grabRight = false;
+                }
+
+                float candidateDist = grabRight ? distR : distL;
+                Vector3 candidatePos = grabRight ? rightHandWorldPos : leftHandWorldPos;
+
+                if (candidateDist < 1.35f && activeHandGrabTransform != null && candidatePos.y > -50f)
+                {
+                    isPlayerHoldingDice = true;
+                    isGrabbingDiceWithRight = grabRight; // LOCK ONTO THE GRABBING HAND!
+                    activeHandGrabTransform.position = candidatePos;
+
+                    physDie1.BeginHandGrab(activeHandGrabTransform, new Vector3(-0.028f, 0f, 0f));
+                    physDie2.BeginHandGrab(activeHandGrabTransform, new Vector3(0.028f, 0f, 0f));
+
+                    PlaySFX(diceRollSound, procDiceClip, 1.15f);
+                    RefreshDashboard("PULLED 3D DICE TO " + (isGrabbingDiceWithRight ? "RIGHT" : "LEFT") + " HAND!", "Shake your hand and release your pinch to THROW the dice onto Central Park!");
+                }
             }
         }
-        else if (isPlayerHoldingDice)
+        else // isPlayerHoldingDice is true -> stay LOCKED onto the grabbing hand
         {
-            if (!rPinchHeld && !lPinchHeld)
+            Vector3 lockedHandPos = isGrabbingDiceWithRight ? rightHandWorldPos : leftHandWorldPos;
+            if (activeHandGrabTransform != null && lockedHandPos.y > -50f)
+            {
+                activeHandGrabTransform.position = lockedHandPos;
+            }
+
+            bool grabbingHandPinching = isGrabbingDiceWithRight ? rPinchHeld : lPinchHeld;
+            bool grabbingHandTracked = isGrabbingDiceWithRight ? isRightHandTracked : isLeftHandTracked;
+
+            // Throw when the specific grabbing hand releases pinch
+            if (!grabbingHandPinching || (!grabbingHandTracked && !rPinchHeld && !lPinchHeld))
             {
                 isPlayerHoldingDice = false;
                 StartCoroutine(ExecutePhysicsDiceRollTurn(false));
@@ -689,21 +793,35 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (currentState != TurnState.BuyOrPassDecision || grabbableDeedCrystal == null || !grabbableDeedCrystal.activeSelf) return;
 
-        // Right-hand pinch pulls the 3D Title Deed Crystal into your hand from up to 1.2m away!
-        if (!isHoldingDeedCrystal && rPinchDown)
+        if (!isHoldingDeedCrystal)
         {
-            if (Vector3.Distance(rightHandWorldPos, grabbableDeedCrystal.transform.position) < 1.20f)
+            if (rPinchDown || lPinchDown)
             {
-                isHoldingDeedCrystal = true;
-                PlaySFX(tokenMoveSound, procStepClip, 1.2f);
-                RefreshDashboard("PULLED TITLE DEED CRYSTAL TO HAND!", "Release your pinch (or slam onto the board) to purchase this property!");
+                float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, grabbableDeedCrystal.transform.position) : 99f;
+                float distL = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(leftHandWorldPos, grabbableDeedCrystal.transform.position) : 99f;
+
+                bool grabRight = (rPinchDown && lPinchDown) ? (distR <= distL) : rPinchDown;
+                float candidateDist = grabRight ? distR : distL;
+
+                if (candidateDist < 1.25f)
+                {
+                    isHoldingDeedCrystal = true;
+                    isHoldingDeedWithRight = grabRight;
+                    PlaySFX(tokenMoveSound, procStepClip, 1.2f);
+                    RefreshDashboard("PULLED TITLE DEED CRYSTAL TO " + (isHoldingDeedWithRight ? "RIGHT" : "LEFT") + " HAND!", "Release your pinch (or slam onto the board) to purchase this property!");
+                }
             }
         }
-        else if (isHoldingDeedCrystal)
+        else
         {
-            grabbableDeedCrystal.transform.position = Vector3.Lerp(grabbableDeedCrystal.transform.position, rightHandWorldPos, Time.deltaTime * 24f);
+            Vector3 targetHandPos = isHoldingDeedWithRight ? rightHandWorldPos : leftHandWorldPos;
+            if (targetHandPos.y > -50f)
+            {
+                grabbableDeedCrystal.transform.position = Vector3.Lerp(grabbableDeedCrystal.transform.position, targetHandPos, Time.deltaTime * 24f);
+            }
 
-            if (!rPinchHeld || grabbableDeedCrystal.transform.localPosition.y < 0.08f)
+            bool heldPinch = isHoldingDeedWithRight ? rPinchHeld : lPinchHeld;
+            if (!heldPinch || grabbableDeedCrystal.transform.localPosition.y < 0.08f)
             {
                 isHoldingDeedCrystal = false;
                 PurchaseCurrentTile(0);
@@ -2021,6 +2139,7 @@ public class TycoonBoardManager : MonoBehaviour
     IEnumerator ExecutePhysicsDiceRollTurn(bool useImpulseToss)
     {
         currentState = TurnState.DiceTumbling;
+        isPlayerHoldingDice = false;
         HideDeedCard();
 
         if (physDie1 != null && physDie2 != null)
