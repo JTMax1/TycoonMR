@@ -53,27 +53,35 @@ public class PhysicalThrowDie : MonoBehaviour
         SetupMetaISDKGrabComponents();
     }
 
-    void SetupMetaISDKGrabComponents()
+    public void InjectMetaGrabbable(Grabbable g)
+    {
+        metaGrabbable = g;
+    }
+
+    public void SetupMetaISDKGrabComponents()
     {
         // Automatically attach Meta XR Interaction SDK Grabbable + HandGrabInteractable + DistanceHandGrabInteractable
         // so your Interactions Rig & Distance Grab Building Blocks recognize this die natively!
         try
         {
-            metaGrabbable = GetComponent<Grabbable>();
             if (metaGrabbable == null)
             {
-                metaGrabbable = gameObject.AddComponent<Grabbable>();
-                metaGrabbable.InjectOptionalRigidbody(rb);
+                metaGrabbable = GetComponent<Grabbable>();
+                if (metaGrabbable == null)
+                {
+                    metaGrabbable = gameObject.AddComponent<Grabbable>();
+                    metaGrabbable.InjectOptionalRigidbody(rb);
+                }
             }
 
-            if (GetComponent<HandGrabInteractable>() == null)
+            if (GetComponent<HandGrabInteractable>() == null && GetComponentInChildren<HandGrabInteractable>() == null)
             {
                 HandGrabInteractable hgi = gameObject.AddComponent<HandGrabInteractable>();
                 hgi.InjectRigidbody(rb);
                 hgi.InjectOptionalPointableElement(metaGrabbable);
             }
 
-            if (GetComponent<DistanceHandGrabInteractable>() == null)
+            if (GetComponent<DistanceHandGrabInteractable>() == null && GetComponentInChildren<DistanceHandGrabInteractable>() == null)
             {
                 DistanceHandGrabInteractable dhgi = gameObject.AddComponent<DistanceHandGrabInteractable>();
                 dhgi.InjectRigidbody(rb);

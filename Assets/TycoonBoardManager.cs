@@ -5,6 +5,7 @@ using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using TMPro;
 using Oculus.Interaction;
+using Oculus.Interaction.HandGrab;
 
 [RequireComponent(typeof(AudioSource))]
 public class TycoonBoardManager : MonoBehaviour
@@ -58,6 +59,7 @@ public class TycoonBoardManager : MonoBehaviour
         public int[] rentByLevel;
         public int owner = -1;
         public int buildingLevel = 0;
+        public bool isMortgaged = false;
         public Transform tileTransform;
         public Renderer tileRenderer;
         public GameObject ownershipBadge;
@@ -104,6 +106,13 @@ public class TycoonBoardManager : MonoBehaviour
     private TextMeshProUGUI dashboardTitleTMP;
     private TextMeshProUGUI dashboardBodyTMP;
     private TextMeshProUGUI dashboardPromptTMP;
+    private TextMeshProUGUI dashboardStatsTMP;
+
+    private int selectedTileIndex = -1;
+    private float lastTilePokeTime = 0f;
+    private Transform mortgageButtonTransform;
+    private TextMeshProUGUI mortgageBtnText;
+    private Renderer mortgageBtnRenderer;
 
     private GameObject deedCardHolder;
     private Renderer deedHeaderRenderer;
@@ -176,6 +185,64 @@ public class TycoonBoardManager : MonoBehaviour
         if (boardRb != null) Destroy(boardRb);
 
         EnforceUnderlayPassthrough();
+    }
+
+    void AttachNativeBuildingBlockGrab(GameObject targetObj, Rigidbody targetRb)
+    {
+        if (targetObj == null) return;
+        if (targetRb == null)
+        {
+            targetRb = targetObj.GetComponent<Rigidbody>();
+            if (targetRb == null) targetRb = targetObj.AddComponent<Rigidbody>();
+        }
+
+        Grabbable targetGrabbable = targetObj.GetComponent<Grabbable>();
+        if (targetGrabbable == null) targetGrabbable = targetObj.AddComponent<Grabbable>();
+        targetGrabbable.InjectOptionalRigidbody(targetRb);
+
+        if (buildingBlockGrabTemplate != null && buildingBlockGrabTemplate.transform.childCount > 0)
+        {
+            Transform existingChild = targetObj.transform.Find("[BuildingBlock] DistanceHandGrab");
+            if (existingChild == null)
+            {
+                Transform templateChild = buildingBlockGrabTemplate.transform.GetChild(0);
+                GameObject clonedChild = Instantiate(templateChild.gameObject, targetObj.transform);
+                clonedChild.name = "[BuildingBlock] DistanceHandGrab";
+                clonedChild.transform.localPosition = Vector3.zero;
+                clonedChild.transform.localRotation = Quaternion.identity;
+                clonedChild.transform.localScale = Vector3.one;
+                clonedChild.SetActive(true);
+
+                HandGrabInteractable hgi = clonedChild.GetComponent<HandGrabInteractable>();
+                if (hgi != null)
+                {
+                    hgi.InjectRigidbody(targetRb);
+                    hgi.InjectOptionalPointableElement(targetGrabbable);
+                }
+
+                DistanceHandGrabInteractable dhgi = clonedChild.GetComponent<DistanceHandGrabInteractable>();
+                if (dhgi != null)
+                {
+                    dhgi.InjectRigidbody(targetRb);
+                    dhgi.InjectOptionalPointableElement(targetGrabbable);
+                }
+            }
+        }
+        else
+        {
+            if (targetObj.GetComponent<HandGrabInteractable>() == null && targetObj.GetComponentInChildren<HandGrabInteractable>() == null)
+            {
+                HandGrabInteractable hgi = targetObj.AddComponent<HandGrabInteractable>();
+                hgi.InjectRigidbody(targetRb);
+                hgi.InjectOptionalPointableElement(targetGrabbable);
+            }
+            if (targetObj.GetComponent<DistanceHandGrabInteractable>() == null && targetObj.GetComponentInChildren<DistanceHandGrabInteractable>() == null)
+            {
+                DistanceHandGrabInteractable dhgi = targetObj.AddComponent<DistanceHandGrabInteractable>();
+                dhgi.InjectRigidbody(targetRb);
+                dhgi.InjectOptionalPointableElement(targetGrabbable);
+            }
+        }
     }
 
    void EnforceUnderlayPassthrough()
@@ -595,6 +662,7 @@ public class TycoonBoardManager : MonoBehaviour
         bool recenterPressed = Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
         bool shrinkPressed = Keyboard.current != null && Keyboard.current.minusKey.wasPressedThisFrame;
         bool growPressed = Keyboard.current != null && Keyboard.current.equalsKey.wasPressedThisFrame;
+        bool kPressed = Keyboard.current != null && Keyboard.current.kKey.wasPressedThisFrame;
 
         if (recenterPressed) RecenterBoardInFrontOfPlayer();
         if (shrinkPressed) AdjustBoardScale(-0.12f);
@@ -656,11 +724,38 @@ public class TycoonBoardManager : MonoBehaviour
         else if (touchedButton == 7) AdjustBoardScale(0.12f);
         else if (touchedButton == 8) RecenterBoardInFrontOfPlayer();
 
-        // Only trigger Distance Grab / Hand Grab if the player didn't just poke a button!
-        if (touchedButton == -1)
+        // Check contextual [MORTGAGE] button poke or K key
+        bool mortgagePoked = CheckMortgageButtonPoke();
+        if (kPressed || mortgagePoked)
+        {
+            if (selectedTileIndex >= 0 && selectedTileIndex < 40)
+            {
+                ExecuteMortgageOrUnmortgage(board[selectedTileIndex]);
+            }
+            else if (board[playerPos[0]].owner == 0)
+            {
+                ExecuteMortgageOrUnmortgage(board[playerPos[0]]);
+            }
+        }
+
+        // Only trigger Distance Grab / Hand Grab / Tile Poke if player didn't just poke a UI button!
+        if (touchedButton == -1 && !mortgagePoked)
         {
             HandlePhysicalDiceGrabAndThrow(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
             HandlePhysicalDeedCrystalGrab(rightPinchDown, leftPinchDown, rightPinchHeld, leftPinchHeld);
+
+            // 40-Tile fingertip poke detection
+            if (!isPlayerHoldingDice && !isHoldingDeedCrystal)
+            {
+                int pokedTile = CheckPhysicalTilePoke();
+                if (pokedTile != -1)
+                {
+                    selectedTileIndex = pokedTile;
+                    ShowDeedCardForTile(board[selectedTileIndex]);
+                    PlaySFX(tokenMoveSound, procStepClip, 1.4f);
+                    StartCoroutine(AnimateButtonPress(board[selectedTileIndex].tileTransform));
+                }
+            }
         }
 
         if (takeoverPressed && (currentState == TurnState.WaitingForRoll || currentState == TurnState.BuyOrPassDecision))
@@ -699,6 +794,8 @@ public class TycoonBoardManager : MonoBehaviour
 
         if (moodPressed) ToggleMarketAtmosphere();
         if (vrViewPressed) TogglePenthouseScaleShift();
+
+        UpdateLiveHUDStats();
     }
 
     // --- DISTANCE GRAB (PULL INTERACTABLE TO HAND) & HAND GRAB FOR DICE ---
@@ -793,8 +890,23 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (currentState != TurnState.BuyOrPassDecision || grabbableDeedCrystal == null || !grabbableDeedCrystal.activeSelf) return;
 
+        Grabbable crystalGrabbable = grabbableDeedCrystal.GetComponent<Grabbable>();
+
         if (!isHoldingDeedCrystal)
         {
+            // Direct touch / native ISDK selection check
+            if (crystalGrabbable != null && crystalGrabbable.SelectingPointsCount > 0)
+            {
+                isHoldingDeedCrystal = true;
+                float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, grabbableDeedCrystal.transform.position) : 99f;
+                float distL = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(leftHandWorldPos, grabbableDeedCrystal.transform.position) : 99f;
+                isHoldingDeedWithRight = (distR <= distL);
+                PlaySFX(tokenMoveSound, procStepClip, 1.2f);
+                RefreshDashboard("HOLDING TITLE DEED CRYSTAL IN " + (isHoldingDeedWithRight ? "RIGHT" : "LEFT") + " HAND!", "Release your pinch (or slam onto the board) to purchase this property!");
+                return;
+            }
+
+            // Distance grab pinch check
             if (rPinchDown || lPinchDown)
             {
                 float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, grabbableDeedCrystal.transform.position) : 99f;
@@ -837,7 +949,18 @@ public class TycoonBoardManager : MonoBehaviour
         grabbableDeedCrystal.transform.localPosition = new Vector3(0.24f, 0.24f, -0.18f);
         grabbableDeedCrystal.transform.localRotation = Quaternion.Euler(45f, 45f, 0f);
         grabbableDeedCrystal.transform.localScale = Vector3.one * 0.055f;
-        Destroy(grabbableDeedCrystal.GetComponent<Collider>());
+
+        // Keep BoxCollider on crystal so Meta's ISDK can grab it natively
+        BoxCollider crystalBox = grabbableDeedCrystal.GetComponent<BoxCollider>();
+        if (crystalBox != null) crystalBox.isTrigger = false;
+
+        Rigidbody crystalRb = grabbableDeedCrystal.GetComponent<Rigidbody>();
+        if (crystalRb == null) crystalRb = grabbableDeedCrystal.AddComponent<Rigidbody>();
+        crystalRb.isKinematic = true;
+        crystalRb.useGravity = false;
+
+        AttachNativeBuildingBlockGrab(grabbableDeedCrystal, crystalRb);
+
         grabbableDeedCrystal.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.84f, 0.22f), 0.95f, 0.85f);
         grabbableDeedCrystal.SetActive(false);
     }
@@ -1572,12 +1695,152 @@ public class TycoonBoardManager : MonoBehaviour
         deedBodyTMP = CreateUGUIText(canvasGO.transform, "DeedBody", new Vector2(0, -35), 23, new Color(0.10f, 0.12f, 0.16f));
         deedBodyTMP.rectTransform.sizeDelta = new Vector2(420f, 440f);
 
+        mortgageButtonTransform = CreateMortgageButtonOnDeedCard(deedCardHolder.transform);
+
         deedCardHolder.SetActive(false);
+    }
+
+    Transform CreateMortgageButtonOnDeedCard(Transform parent)
+    {
+        GameObject btn = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        btn.name = "TouchButton_MORTGAGE";
+        btn.transform.SetParent(parent, false);
+        btn.transform.localPosition = new Vector3(0f, -0.175f, -0.005f);
+        btn.transform.localScale = new Vector3(0.18f, 0.038f, 0.014f);
+
+        BoxCollider box = btn.GetComponent<BoxCollider>();
+        if (box != null) box.isTrigger = true;
+
+        mortgageBtnRenderer = btn.GetComponent<Renderer>();
+        mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.85f, 0.25f, 0.20f), 0.85f);
+
+        GameObject btnCanvasGO = new GameObject("BtnLabel_Mortgage");
+        btnCanvasGO.transform.SetParent(btn.transform, false);
+        btnCanvasGO.transform.localPosition = new Vector3(0f, 0f, -0.55f);
+        btnCanvasGO.transform.localRotation = Quaternion.identity;
+        btnCanvasGO.transform.localScale = new Vector3(0.0035f, 0.0035f, 0.0035f);
+
+        Canvas bc = btnCanvasGO.AddComponent<Canvas>();
+        bc.renderMode = RenderMode.WorldSpace;
+        btnCanvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(260f, 80f);
+
+        GameObject txtGO = new GameObject("Label");
+        txtGO.transform.SetParent(btnCanvasGO.transform, false);
+        mortgageBtnText = txtGO.AddComponent<TextMeshProUGUI>();
+        mortgageBtnText.text = "[MORTGAGE (K)]";
+        mortgageBtnText.fontSize = 24;
+        mortgageBtnText.color = Color.white;
+        mortgageBtnText.alignment = TextAlignmentOptions.Center;
+        mortgageBtnText.rectTransform.sizeDelta = new Vector2(260f, 80f);
+
+        btn.SetActive(false);
+        return btn.transform;
+    }
+
+    bool CheckMortgageButtonPoke()
+    {
+        if (mortgageButtonTransform == null || !mortgageButtonTransform.gameObject.activeInHierarchy) return false;
+        if (Time.time < lastButtonTouchTime) return false;
+        if (!isRightHandTracked && !isLeftHandTracked) return false;
+
+        Collider col = mortgageButtonTransform.GetComponent<Collider>();
+        if (col == null) return false;
+
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+
+        if (rightPoked || leftPoked)
+        {
+            lastButtonTouchTime = Time.time + 0.50f;
+            StartCoroutine(AnimateButtonPress(mortgageButtonTransform));
+            return true;
+        }
+        return false;
+    }
+
+    int CheckPhysicalTilePoke()
+    {
+        if (Time.time < lastTilePokeTime) return -1;
+        if (!isRightHandTracked && !isLeftHandTracked) return -1;
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] == null || board[i].tileTransform == null) continue;
+            Collider col = board[i].tileTransform.GetComponent<Collider>();
+            if (col == null) continue;
+
+            bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
+            bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+
+            if (rightPoked || leftPoked)
+            {
+                lastTilePokeTime = Time.time + 0.50f;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void ExecuteMortgageOrUnmortgage(BoardTile tile)
+    {
+        if (tile == null || tile.owner != 0) return;
+
+        if (!tile.isMortgaged)
+        {
+            // Sell building level back to bank for 50% buildCost
+            if (tile.buildingLevel > 0)
+            {
+                int refund = tile.buildCost / 2;
+                playerCash[0] += refund;
+                tile.buildingLevel--;
+                if (tile.spawnedBuilding != null) Destroy(tile.spawnedBuilding);
+                if (tile.buildingLevel > 0) ConstructChronological3DBuilding(tile);
+                PlaySFX(cashRegisterSound, procBuildClip, 1.1f);
+                RefreshDashboard($"SOLD BUILDING ON {tile.name} (+${refund})", $"Building level reduced to {tile.buildingLevel}/5. Cash: ${playerCash[0]}");
+            }
+            else
+            {
+                // Mortgage deed for +50% of price
+                int mortgageValue = tile.price / 2;
+                playerCash[0] += mortgageValue;
+                tile.isMortgaged = true;
+                if (tile.ownershipBadge != null)
+                {
+                    Renderer r = tile.ownershipBadge.GetComponent<Renderer>();
+                    if (r != null) r.material = CreateColoredMaterial(new Color(0.48f, 0.12f, 0.16f), 0.95f);
+                }
+                PlaySFX(cashRegisterSound, procDiceClip, 0.95f);
+                RefreshDashboard($"MORTGAGED {tile.name} (+${mortgageValue})", $"Property mortgaged! Rent is now $0. Cash: ${playerCash[0]}");
+            }
+        }
+        else
+        {
+            // Unmortgage: deduct 50% principal + 10% interest = 55% of price
+            int unmortgageCost = (int)(tile.price * 0.55f);
+            if (playerCash[0] < unmortgageCost)
+            {
+                RefreshDashboard($"NEED ${unmortgageCost} TO UNMORTGAGE", $"Insufficient cash to unmortgage {tile.name}.");
+                return;
+            }
+
+            playerCash[0] -= unmortgageCost;
+            tile.isMortgaged = false;
+            if (tile.ownershipBadge != null)
+            {
+                Renderer r = tile.ownershipBadge.GetComponent<Renderer>();
+                if (r != null) r.material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.95f);
+            }
+            PlaySFX(cashRegisterSound, procStepClip, 1.15f);
+            RefreshDashboard($"UNMORTGAGED {tile.name} (-${unmortgageCost})", $"Property active! Full rent restored. Cash: ${playerCash[0]}");
+        }
+
+        ShowDeedCardForTile(tile);
+        UpdateLiveHUDStats();
     }
 
     void ShowDeedCardForTile(BoardTile tile)
     {
-        if (deedCardHolder == null) return;
+        if (deedCardHolder == null || tile == null) return;
         deedCardHolder.SetActive(true);
         deedHeaderRenderer.material = CreateColoredMaterial(GetOfficialColor(tile), 0.85f);
         deedTitleTMP.text = tile.name;
@@ -1589,29 +1852,72 @@ public class TycoonBoardManager : MonoBehaviour
             grabbableDeedCrystal.GetComponent<Renderer>().material = CreateColoredMaterial(GetOfficialColor(tile), 0.95f, 0.7f);
         }
 
+        string ownerLabel = tile.owner == -1 ? "UNOWNED" : (tile.owner == 0 ? "YOU (PLAYER 1)" : "RIVAL MOGUL");
+        string mortgageStatus = tile.isMortgaged ? "<color=#FF5252>MORTGAGED (RENT: $0)</color>" : "<color=#69F0AE>ACTIVE</color>";
+
         if (tile.type == TileType.Property && tile.rentByLevel != null)
         {
             deedBodyTMP.text =
-                $"<b>PRICE: ${tile.price}</b>\n" +
+                $"<b>PRICE: ${tile.price}  |  {ownerLabel}</b>\n" +
+                $"STATUS: {mortgageStatus}\n" +
                 $"BASE RENT: ${tile.rentByLevel[0]}\n" +
                 $"1 HOUSE: ${tile.rentByLevel[1]}\n" +
                 $"2 HOUSES: ${tile.rentByLevel[2]}\n" +
                 $"3 HOUSES: ${tile.rentByLevel[3]}\n" +
                 $"4 HOUSES: ${tile.rentByLevel[4]}\n" +
                 $"<b>SKYSCRAPER: ${tile.rentByLevel[5]}</b>\n" +
-                $"BUILD COST: ${tile.buildCost}";
+                $"BUILD COST: ${tile.buildCost} | LVL: {tile.buildingLevel}/5";
         }
         else if (tile.type == TileType.Railroad)
         {
             deedBodyTMP.text =
-                $"<b>TRANSIT HUB: ${tile.price}</b>\n\n" +
+                $"<b>TRANSIT HUB: ${tile.price}  |  {ownerLabel}</b>\n" +
+                $"STATUS: {mortgageStatus}\n\n" +
                 "1 OWNED: $25\n2 OWNED: $50\n3 OWNED: $100\n4 OWNED: $200";
+        }
+        else if (tile.type == TileType.Utility)
+        {
+            deedBodyTMP.text =
+                $"<b>UTILITY DEED: ${tile.price}  |  {ownerLabel}</b>\n" +
+                $"STATUS: {mortgageStatus}\n\n" +
+                "1 UTILITY: 4x DICE ROLL\nBOTH UTILITIES: 10x DICE ROLL";
         }
         else
         {
-            deedBodyTMP.text =
-                $"<b>UTILITY DEED: ${tile.price}</b>\n\n" +
-                "1 UTILITY: 4x DICE ROLL\nBOTH UTILITIES: 10x DICE ROLL";
+            deedBodyTMP.text = $"<b>{tile.name}</b>\n\n{tile.type}";
+        }
+
+        if (mortgageButtonTransform != null)
+        {
+            if (tile.owner == 0)
+            {
+                mortgageButtonTransform.gameObject.SetActive(true);
+                if (tile.isMortgaged)
+                {
+                    int unmortgageCost = (int)(tile.price * 0.55f);
+                    mortgageBtnText.text = $"[UNMORTGAGE (-${unmortgageCost})]";
+                    mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.18f, 0.65f, 0.35f), 0.85f);
+                }
+                else
+                {
+                    if (tile.buildingLevel > 0)
+                    {
+                        int sellPrice = tile.buildCost / 2;
+                        mortgageBtnText.text = $"[SELL BLDG (+${sellPrice})]";
+                        mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.92f, 0.55f, 0.15f), 0.85f);
+                    }
+                    else
+                    {
+                        int mortgageVal = tile.price / 2;
+                        mortgageBtnText.text = $"[MORTGAGE (+${mortgageVal})]";
+                        mortgageBtnRenderer.material = CreateColoredMaterial(new Color(0.85f, 0.25f, 0.20f), 0.85f);
+                    }
+                }
+            }
+            else
+            {
+                mortgageButtonTransform.gameObject.SetActive(false);
+            }
         }
     }
 
@@ -1622,12 +1928,15 @@ public class TycoonBoardManager : MonoBehaviour
         deedHeaderRenderer.material = CreateColoredMaterial(headerColor, 0.9f);
         deedTitleTMP.text = headerTitle;
         deedBodyTMP.text = $"<b>EXECUTIVE DIRECTIVE</b>\n\n{cardDescription}";
+        if (mortgageButtonTransform != null) mortgageButtonTransform.gameObject.SetActive(false);
     }
 
     void HideDeedCard()
     {
         if (deedCardHolder != null) deedCardHolder.SetActive(false);
         if (grabbableDeedCrystal != null) grabbableDeedCrystal.SetActive(false);
+        if (mortgageButtonTransform != null) mortgageButtonTransform.gameObject.SetActive(false);
+        selectedTileIndex = -1;
     }
 
     Quaternion GetFlatDieRotationForValue(int faceValue)
@@ -1711,6 +2020,12 @@ public class TycoonBoardManager : MonoBehaviour
         die1Transform.localRotation = GetFlatDieRotationForValue(6);
         die2Transform.localRotation = GetFlatDieRotationForValue(6);
 
+        // Attach native building block grab setup to dice
+        AttachNativeBuildingBlockGrab(die1Transform.gameObject, die1Transform.GetComponent<Rigidbody>());
+        AttachNativeBuildingBlockGrab(die2Transform.gameObject, die2Transform.GetComponent<Rigidbody>());
+        if (physDie1 != null) physDie1.InjectMetaGrabbable(die1Transform.GetComponent<Grabbable>());
+        if (physDie2 != null) physDie2.InjectMetaGrabbable(die2Transform.GetComponent<Grabbable>());
+
         GameObject dashHolder = new GameObject("Executive_Holo_Dashboard");
         dashHolder.transform.SetParent(transform, false);
         dashHolder.transform.localPosition = new Vector3(0f, 0.48f, 0.22f);
@@ -1719,7 +2034,7 @@ public class TycoonBoardManager : MonoBehaviour
         GameObject bgBoard = GameObject.CreatePrimitive(PrimitiveType.Cube);
         bgBoard.name = "Dashboard_Glass_Plate";
         bgBoard.transform.SetParent(dashHolder.transform, false);
-        bgBoard.transform.localScale = new Vector3(0.68f, 0.26f, 0.01f);
+        bgBoard.transform.localScale = new Vector3(0.74f, 0.30f, 0.01f);
         Destroy(bgBoard.GetComponent<Collider>());
         bgBoard.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.05f, 0.07f, 0.11f), 0.9f);
 
@@ -1730,11 +2045,16 @@ public class TycoonBoardManager : MonoBehaviour
 
         Canvas c = canvasGO.AddComponent<Canvas>();
         c.renderMode = RenderMode.WorldSpace;
-        canvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(980f, 350f);
+        canvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(1040f, 400f);
 
-        dashboardTitleTMP = CreateUGUIText(canvasGO.transform, "Title", new Vector2(0, 100), 34, new Color(1f, 0.84f, 0.32f));
-        dashboardBodyTMP = CreateUGUIText(canvasGO.transform, "Body", new Vector2(0, 5), 29, Color.white);
-        dashboardPromptTMP = CreateUGUIText(canvasGO.transform, "Prompt", new Vector2(0, -95), 24, new Color(0.45f, 0.90f, 1f));
+        dashboardStatsTMP = CreateUGUIText(canvasGO.transform, "LiveStats", new Vector2(0, 130), 22, new Color(0.35f, 0.95f, 0.60f));
+        dashboardStatsTMP.rectTransform.sizeDelta = new Vector2(1000f, 60f);
+
+        dashboardTitleTMP = CreateUGUIText(canvasGO.transform, "Title", new Vector2(0, 65), 32, new Color(1f, 0.84f, 0.32f));
+        dashboardBodyTMP = CreateUGUIText(canvasGO.transform, "Body", new Vector2(0, -10), 27, Color.white);
+        dashboardPromptTMP = CreateUGUIText(canvasGO.transform, "Prompt", new Vector2(0, -90), 22, new Color(0.45f, 0.90f, 1f));
+
+        UpdateLiveHUDStats();
     }
 
     TextMeshProUGUI CreateUGUIText(Transform canvasParent, string name, Vector2 anchoredPos, float fontSize, Color color)
@@ -2027,7 +2347,10 @@ public class TycoonBoardManager : MonoBehaviour
             float width = isCorner ? step * 0.92f : step * 0.80f;
             float depth = isCorner ? step * 0.92f : step * 0.96f;
             plot.transform.localScale = new Vector3(width, 0.014f, depth);
-            Destroy(plot.GetComponent<Collider>());
+
+            // Configure each tile's BoxCollider as a Trigger so fingertip poking detects it!
+            BoxCollider tileCol = plot.GetComponent<BoxCollider>();
+            if (tileCol != null) tileCol.isTrigger = true;
 
             Renderer plotRenderer = plot.GetComponent<Renderer>();
             plotRenderer.material = CreateColoredMaterial(new Color(0.82f, 0.65f, 0.26f), 0.78f, 0.5f);
@@ -2500,7 +2823,16 @@ public class TycoonBoardManager : MonoBehaviour
         BoardTile standingTile = board[playerPos[playerIdx]];
         BoardTile targetTile = null;
 
-        if (standingTile.type == TileType.Property && standingTile.owner == playerIdx && standingTile.buildingLevel < 5)
+        // Targeted Upgrade: if inspecting an owned, unmortgaged property via tile poke, upgrade that specific tile first!
+        if (playerIdx == 0 && selectedTileIndex >= 0 && selectedTileIndex < 40 &&
+            board[selectedTileIndex].type == TileType.Property &&
+            board[selectedTileIndex].owner == playerIdx &&
+            !board[selectedTileIndex].isMortgaged &&
+            board[selectedTileIndex].buildingLevel < 5)
+        {
+            targetTile = board[selectedTileIndex];
+        }
+        else if (standingTile.type == TileType.Property && standingTile.owner == playerIdx && !standingTile.isMortgaged && standingTile.buildingLevel < 5)
         {
             targetTile = standingTile;
         }
@@ -2510,7 +2842,7 @@ public class TycoonBoardManager : MonoBehaviour
             for (int offset = 0; offset < 40; offset++)
             {
                 int idx = (buildCycleCursor + offset) % 40;
-                if (board[idx].type == TileType.Property && board[idx].owner == playerIdx && board[idx].buildingLevel < 5)
+                if (board[idx].type == TileType.Property && board[idx].owner == playerIdx && !board[idx].isMortgaged && board[idx].buildingLevel < 5)
                 {
                     if (board[idx].buildingLevel < lowestLevelFound)
                     {
@@ -2554,6 +2886,12 @@ public class TycoonBoardManager : MonoBehaviour
             $"BUILT {tierLabel} ON {targetTile.name}!",
             $"Paid ${targetTile.buildCost} | New Rent: ${targetTile.rentByLevel[targetTile.buildingLevel]}"
         );
+
+        if (selectedTileIndex == targetTile.index)
+        {
+            ShowDeedCardForTile(targetTile);
+        }
+        UpdateLiveHUDStats();
     }
 
     GameObject GetPrefabForChronologicalLevel(int level)
@@ -2645,6 +2983,8 @@ public class TycoonBoardManager : MonoBehaviour
 
     int CalculateAuthenticRent(BoardTile tile, int diceRoll)
     {
+        if (tile.isMortgaged) return 0;
+
         if (tile.type == TileType.Railroad)
         {
             int rrCount = 0;
@@ -2741,12 +3081,73 @@ public class TycoonBoardManager : MonoBehaviour
         RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
     }
 
+    int CalculatePlayerNetWorth(int playerIdx)
+    {
+        int net = playerCash[playerIdx];
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null && board[i].owner == playerIdx)
+            {
+                net += board[i].isMortgaged ? (board[i].price / 2) : board[i].price;
+                net += (board[i].buildingLevel * board[i].buildCost);
+            }
+        }
+        return net;
+    }
+
+    string GetMonopolyProgressSummary(int playerIdx)
+    {
+        string[] groupNames = { "Brown", "Light Blue", "Pink", "Orange", "Red", "Yellow", "Green", "Dark Blue" };
+        int monopolies = 0;
+        List<string> nearSets = new List<string>();
+
+        for (int g = 0; g < 8; g++)
+        {
+            int totalInGroup = 0;
+            int ownedInGroup = 0;
+            for (int i = 0; i < 40; i++)
+            {
+                if (board[i] != null && board[i].colorGroup == g)
+                {
+                    totalInGroup++;
+                    if (board[i].owner == playerIdx)
+                        ownedInGroup++;
+                }
+            }
+
+            if (totalInGroup > 0)
+            {
+                if (ownedInGroup == totalInGroup)
+                {
+                    monopolies++;
+                }
+                else if (ownedInGroup == totalInGroup - 1 && ownedInGroup > 0)
+                {
+                    nearSets.Add($"{groupNames[g]} ({ownedInGroup}/{totalInGroup})");
+                }
+            }
+        }
+
+        string nearSetText = nearSets.Count > 0 ? string.Join(", ", nearSets) : "None";
+        return $"MONOPOLIES: {monopolies} | NEAR SET: {nearSetText}";
+    }
+
+    void UpdateLiveHUDStats()
+    {
+        if (dashboardStatsTMP == null) return;
+        int net0 = CalculatePlayerNetWorth(0);
+        int net1 = CalculatePlayerNetWorth(1);
+        string monopolySummary = GetMonopolyProgressSummary(0);
+        dashboardStatsTMP.text = $"YOU: ${playerCash[0]} (NET: ${net0})  |  AI: ${playerCash[1]} (NET: ${net1})  |  POT: ${freeParkingJackpot}  |  {monopolySummary}";
+    }
+
     void RefreshDashboard(string eventHeadline, string promptLine)
     {
         if (dashboardTitleTMP == null) return;
         dashboardTitleTMP.text = $"YOU: ${playerCash[0]}  |  AI: ${playerCash[1]}  |  JACKPOT: ${freeParkingJackpot}";
         dashboardBodyTMP.text = eventHeadline;
         dashboardPromptTMP.text = promptLine;
+        UpdateLiveHUDStats();
     }
 
     // 3. Replace ToggleMarketAtmosphere() so streetlight intensity stays gentle (0.15f Night / 0.06f Day):
