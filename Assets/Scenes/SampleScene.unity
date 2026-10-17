@@ -1223,7 +1223,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TycoonBoardManager
   passthroughLayer: {fileID: 663140318}
-  dicePrefab: {fileID: 0}
+  dicePrefab: {fileID: 6801955793903224657, guid: 0d2b9188252a78b4298fb8e34d9229ee, type: 3}
   playerTokenPrefab: {fileID: 400323601965181187, guid: fc1e359a90d4e6542b4d8022c50429ce, type: 3}
   aiRivalTokenPrefab: {fileID: 100010, guid: a7b60e70606f80245b2f8bc7ce2fadb6, type: 3}
   rival2TokenPrefab: {fileID: 6797269430195769530, guid: 0f2505a3f5e77fa44a6703470cc30543, type: 3}
@@ -1238,6 +1238,12 @@ MonoBehaviour:
   level3HousePrefab: {fileID: 8856790077123654498, guid: d1010e756480b8741bb3c4e9122d952e, type: 3}
   level4HousePrefab: {fileID: 4724550707367194761, guid: 54bb0c6cea2adb2408f37dd1ba7a7dd7, type: 3}
   level5SkyscraperPrefab: {fileID: 4508651562860150202, guid: 6d3bd000f9d3e3c479ee0339e54f1247, type: 3}
+  goCornerLandmarkPrefab: {fileID: 4722627683411591535, guid: 580e175accc4f644e8c5daa4090d0293, type: 3}
+  jailCornerLandmarkPrefab: {fileID: 8273424752105082923, guid: c1d3259b1b00f2745934a591a64234a2, type: 3}
+  freeParkingLandmarkPrefab: {fileID: 363025940278517486, guid: eb1a3f979ef5c8743a26ef5a30ec6511, type: 3}
+  goToJailLandmarkPrefab: {fileID: 1295220564887911823, guid: 8bf27f8a5975e1f4e9160e979cfcb02b, type: 3}
+  roadStraightPrefab: {fileID: 100000, guid: 4f32dfddb033d3e40b5841bc53cc1689, type: 3}
+  billboardPropPrefab: {fileID: 3934781833859567844, guid: ccfe0baf0137c8f4a92d8f08c09c2a8d, type: 3}
   parkTreePrefab: {fileID: 8483353424882059376, guid: d77f3988a559cee4f85af6b47c0539a7, type: 3}
   parkCenterpiecePrefab: {fileID: 3226462819479356637, guid: d2d360664b1d55c4584ee3bc8ec31be8, type: 3}
   streetlightPrefab: {fileID: 3351462997267180038, guid: ccab6c8306a6dae4d9688eb372e59639, type: 3}

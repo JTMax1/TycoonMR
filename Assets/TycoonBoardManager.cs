@@ -63,6 +63,20 @@ public class TycoonBoardManager : MonoBehaviour
     public float boardSize = 1.05f;
     public float currentBoardScale = 0.85f;
 
+    [Header("7. Landmark, Road & Prop Prefab Holders (Drag & Drop - Auto-Filled in Editor)")]
+    [Tooltip("Landmark placed beside Tile 0 (GO) - e.g. Market")]
+    public GameObject goCornerLandmarkPrefab;
+    [Tooltip("Landmark placed beside Tile 10 (Jail) - e.g. Police_Station")]
+    public GameObject jailCornerLandmarkPrefab;
+    [Tooltip("Landmark placed beside Tile 20 (Free Parking) - e.g. Hospital or Fire_Station")]
+    public GameObject freeParkingLandmarkPrefab;
+    [Tooltip("Landmark placed beside Tile 30 (Go To Jail) - e.g. School or Workshop")]
+    public GameObject goToJailLandmarkPrefab;
+    [Tooltip("Optional Road Straight prefab for street diorama")]
+    public GameObject roadStraightPrefab;
+    [Tooltip("Optional Billboard prop prefab")]
+    public GameObject billboardPropPrefab;
+
     public enum TileType { Go, Property, Railroad, Utility, Tax, Chance, Chest, Jail, FreeParking, GoToJail }
 
     public class BoardTile
@@ -101,10 +115,30 @@ public class TycoonBoardManager : MonoBehaviour
     private int freeParkingJackpot = 100;
     private Transform jackpotGoldPile;
 
-    private enum TurnState { StartMenu, WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
+    public enum TurnState { StartMenu, WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
     private TurnState currentState = TurnState.WaitingForRoll;
     private int lastDiceTotal = 0;
     private int consecutiveDoubles = 0;
+
+    public TurnState CurrentState => currentState;
+    public bool IsWaitingForRoll => currentState == TurnState.WaitingForRoll;
+    public bool IsBuyOrPassDecision => currentState == TurnState.BuyOrPassDecision;
+    public Vector3 LeftHandWorldPos => leftHandWorldPos;
+    public Vector3 RightHandWorldPos => rightHandWorldPos;
+    public bool IsLeftHandTracked => isLeftHandTracked;
+    public bool IsRightHandTracked => isRightHandTracked;
+    public Transform Die1Transform => die1Transform;
+    public Transform Die2Transform => die2Transform;
+    public PhysicalThrowDie PhysDie1 => physDie1;
+    public PhysicalThrowDie PhysDie2 => physDie2;
+    public bool IsPlayerHoldingDice { get => isPlayerHoldingDice; set => isPlayerHoldingDice = value; }
+    public AudioClip DiceRollSound => diceRollSound != null ? diceRollSound : procDiceClip;
+    public AudioClip CashRegisterSound => cashRegisterSound != null ? cashRegisterSound : procCashClip;
+    public AudioClip TokenMoveSound => tokenMoveSound != null ? tokenMoveSound : procStepClip;
+    public BoardTile CurrentLandingTile => (board != null && playerPos != null && playerPos.Length > 0 && playerPos[0] >= 0 && playerPos[0] < 40) ? board[playerPos[0]] : null;
+    public int PlayerCash => playerCash != null && playerCash.Length > 0 ? playerCash[0] : 0;
+    private TycoonTactileInteractions tactileInteractions;
+    public TycoonTactileInteractions TactileInteractions => tactileInteractions;
 
     public enum MarketCycle { Standard, BullBoom, BearRecession, TechIPOSurge }
     private MarketCycle currentMarketCycle = MarketCycle.Standard;
@@ -132,7 +166,7 @@ public class TycoonBoardManager : MonoBehaviour
     private Transform[] rivalRightHands = new Transform[4];
     private Renderer[] rivalVisorRenderers = new Renderer[4];
     private TextMeshProUGUI[] rivalSpeechBubbles = new TextMeshProUGUI[4];
-    private enum AvatarMood { Neutral, HappyCheer, AngrySlam, Thinking }
+    public enum AvatarMood { Neutral, HappyCheer, AngrySlam, Thinking }
     private AvatarMood[] currentRivalMoods = new AvatarMood[4] { AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral };
     private float[] moodResetTimers = new float[4];
 
@@ -353,6 +387,14 @@ public class TycoonBoardManager : MonoBehaviour
         GenerateProceduralSFX();
 
         InitializeMasterURPMaterial();
+        sharedPropertyBlock = new MaterialPropertyBlock();
+
+        tactileInteractions = GetComponent<TycoonTactileInteractions>();
+        if (tactileInteractions == null)
+        {
+            tactileInteractions = gameObject.AddComponent<TycoonTactileInteractions>();
+        }
+
         CacheMetaInteractionSDKHands();
         InitializeOfficialMonopolyMap();
         Build40TileClockwiseTable();
@@ -500,8 +542,19 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    Material CreateColoredMaterial(Color color, float smoothness = 0.85f, float metallic = 0.05f)
+    private Dictionary<Color32, Material> sharedMaterialCache = new Dictionary<Color32, Material>();
+    private MaterialPropertyBlock sharedPropertyBlock;
+
+    public Material CreateColoredMaterial(Color color, float smoothness = 0.85f, float metallic = 0.05f)
     {
+        Color32 c32 = (Color32)color;
+        if (sharedMaterialCache.TryGetValue(c32, out Material cachedMat) && cachedMat != null)
+        {
+            return cachedMat;
+        }
+
+        if (masterURPMaterial == null) InitializeMasterURPMaterial();
+
         Material m = new Material(masterURPMaterial);
         m.mainTexture = null;
         if (m.HasProperty("_BaseMap")) m.SetTexture("_BaseMap", null);
@@ -510,7 +563,52 @@ public class TycoonBoardManager : MonoBehaviour
         if (m.HasProperty("_Color")) m.SetColor("_Color", color);
         if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
         if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", metallic);
+        sharedMaterialCache[c32] = m;
         return m;
+    }
+
+    public void SetRendererDynamicColor(Renderer rend, Color color)
+    {
+        if (rend == null) return;
+        if (sharedPropertyBlock == null) sharedPropertyBlock = new MaterialPropertyBlock();
+        rend.GetPropertyBlock(sharedPropertyBlock);
+        sharedPropertyBlock.SetColor("_BaseColor", color);
+        sharedPropertyBlock.SetColor("_Color", color);
+        rend.SetPropertyBlock(sharedPropertyBlock);
+    }
+
+    public void FlashRendererDynamicColor(Renderer rend, Color flashColor, float duration = 0.35f)
+    {
+        if (rend != null) StartCoroutine(AnimateDynamicColorFlash(rend, flashColor, duration));
+    }
+
+    private IEnumerator AnimateDynamicColorFlash(Renderer rend, Color flashColor, float duration)
+    {
+        if (rend == null) yield break;
+        if (sharedPropertyBlock == null) sharedPropertyBlock = new MaterialPropertyBlock();
+
+        Color originalColor = rend.sharedMaterial != null ? rend.sharedMaterial.color : Color.white;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            if (rend == null) yield break;
+            elapsed += Time.deltaTime;
+            float t = Mathf.PingPong(elapsed * 4f, 1f);
+            Color c = Color.Lerp(originalColor, flashColor, t);
+            rend.GetPropertyBlock(sharedPropertyBlock);
+            sharedPropertyBlock.SetColor("_BaseColor", c);
+            sharedPropertyBlock.SetColor("_Color", c);
+            rend.SetPropertyBlock(sharedPropertyBlock);
+            yield return null;
+        }
+
+        if (rend != null)
+        {
+            rend.GetPropertyBlock(sharedPropertyBlock);
+            sharedPropertyBlock.SetColor("_BaseColor", originalColor);
+            sharedPropertyBlock.SetColor("_Color", originalColor);
+            rend.SetPropertyBlock(sharedPropertyBlock);
+        }
     }
 
     public Color GetPlayerColor(int p)
@@ -1448,7 +1546,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void SetRivalReaction(int aiPlayerIdx, AvatarMood mood, string speechLine, float duration = 3.0f)
+    public void SetRivalReaction(int aiPlayerIdx, AvatarMood mood, string speechLine, float duration = 3.0f)
     {
         if (aiPlayerIdx < 1 || aiPlayerIdx > 3) aiPlayerIdx = 1;
         currentRivalMoods[aiPlayerIdx] = mood;
@@ -1477,7 +1575,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void SetRivalReaction(AvatarMood mood, string speechLine, float duration = 3.0f)
+    public void SetRivalReaction(AvatarMood mood, string speechLine, float duration = 3.0f)
     {
         SetRivalReaction(1, mood, speechLine, duration);
     }
@@ -1672,20 +1770,56 @@ public class TycoonBoardManager : MonoBehaviour
                 return;
             }
 
-            playerCash[0] -= cashSweetener;
-            playerCash[aiIdx] += cashSweetener;
+            if (tactileInteractions != null)
+            {
+                tactileInteractions.SpawnExecutiveTradeContract(
+                    $"MERGER: {targetTile.name.ToUpper()}",
+                    $"Trade: {playerSolitary.name} + ${cashSweetener} Cash\nAcquire: {targetTile.name} from {aiName}\n\nStamp wax seal to sign, or rip apart to reject!",
+                    () =>
+                    {
+                        if (playerCash[0] < cashSweetener) return;
+                        playerCash[0] -= cashSweetener;
+                        playerCash[aiIdx] += cashSweetener;
 
-            targetTile.owner = 0;
-            ApplyTileOwnershipVisuals(targetTile, 0);
+                        targetTile.owner = 0;
+                        ApplyTileOwnershipVisuals(targetTile, 0);
 
-            playerSolitary.owner = aiIdx;
-            ApplyTileOwnershipVisuals(playerSolitary, aiIdx);
+                        playerSolitary.owner = aiIdx;
+                        ApplyTileOwnershipVisuals(playerSolitary, aiIdx);
 
-            SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
-            RefreshDashboard($"DEAL ACCEPTED: SWAPPED {playerSolitary.name} FOR {targetTile.name}!", $"Merger sealed with ${cashSweetener} cash sweetener!");
+                        SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
+                        RefreshDashboard($"DEAL ACCEPTED: SWAPPED {playerSolitary.name} FOR {targetTile.name}!", $"Merger sealed with ${cashSweetener} cash sweetener!");
 
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
-            PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
+                        PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+                        RebuildMonopolySynergyBeams();
+                        UpdateLiveHUDStats();
+                        SaveGameState();
+                    },
+                    () =>
+                    {
+                        RefreshDashboard("MERGER REJECTED", $"{aiName} retracts the trade proposal.");
+                    }
+                );
+                return;
+            }
+            else
+            {
+                playerCash[0] -= cashSweetener;
+                playerCash[aiIdx] += cashSweetener;
+
+                targetTile.owner = 0;
+                ApplyTileOwnershipVisuals(targetTile, 0);
+
+                playerSolitary.owner = aiIdx;
+                ApplyTileOwnershipVisuals(playerSolitary, aiIdx);
+
+                SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
+                RefreshDashboard($"DEAL ACCEPTED: SWAPPED {playerSolitary.name} FOR {targetTile.name}!", $"Merger sealed with ${cashSweetener} cash sweetener!");
+
+                StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
+                PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+            }
         }
         else if (canOfferBuyout)
         {
@@ -1697,17 +1831,50 @@ public class TycoonBoardManager : MonoBehaviour
                 return;
             }
 
-            playerCash[0] -= buyoutPrice;
-            playerCash[aiIdx] += buyoutPrice;
+            if (tactileInteractions != null)
+            {
+                tactileInteractions.SpawnExecutiveTradeContract(
+                    $"BUYOUT: {targetTile.name.ToUpper()}",
+                    $"Buyout Valuation: ${buyoutPrice} (1.35x Base)\nAcquire: {targetTile.name} from {aiName}\n\nStamp wax seal to sign, or rip apart to reject!",
+                    () =>
+                    {
+                        if (playerCash[0] < buyoutPrice) return;
+                        playerCash[0] -= buyoutPrice;
+                        playerCash[aiIdx] += buyoutPrice;
 
-            targetTile.owner = 0;
-            ApplyTileOwnershipVisuals(targetTile, 0);
+                        targetTile.owner = 0;
+                        ApplyTileOwnershipVisuals(targetTile, 0);
 
-            SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
-            RefreshDashboard($"DEAL ACCEPTED: 1.35x BUYOUT OF {targetTile.name}!", $"Acquired for ${buyoutPrice} (saving 32% vs 2x Hostile Takeover)!");
+                        SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
+                        RefreshDashboard($"DEAL ACCEPTED: 1.35x BUYOUT OF {targetTile.name}!", $"Acquired for ${buyoutPrice} (saving 32% vs 2x Hostile Takeover)!");
 
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
-            PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
+                        PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+                        RebuildMonopolySynergyBeams();
+                        UpdateLiveHUDStats();
+                        SaveGameState();
+                    },
+                    () =>
+                    {
+                        RefreshDashboard("BUYOUT REJECTED", $"{aiName} keeps {targetTile.name}.");
+                    }
+                );
+                return;
+            }
+            else
+            {
+                playerCash[0] -= buyoutPrice;
+                playerCash[aiIdx] += buyoutPrice;
+
+                targetTile.owner = 0;
+                ApplyTileOwnershipVisuals(targetTile, 0);
+
+                SetRivalReaction(aiIdx, AvatarMood.HappyCheer, "Pleasure doing business with you!");
+                RefreshDashboard($"DEAL ACCEPTED: 1.35x BUYOUT OF {targetTile.name}!", $"Acquired for ${buyoutPrice} (saving 32% vs 2x Hostile Takeover)!");
+
+                StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[aiIdx].position, 8));
+                PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+            }
         }
         else
         {
@@ -2850,45 +3017,60 @@ public class TycoonBoardManager : MonoBehaviour
 
     Transform CreateExact3DPipsDie(string name, Vector3 localPos, out PhysicalThrowDie physDieComp)
     {
-        Material ivoryMat = CreateColoredMaterial(new Color(0.97f, 0.96f, 0.92f), 0.85f);
-        Material pipMat = CreateColoredMaterial(new Color(0.06f, 0.06f, 0.08f), 0.9f);
-
         GameObject dieRoot = GameObject.CreatePrimitive(PrimitiveType.Cube);
         dieRoot.name = name;
         dieRoot.transform.SetParent(transform, false);
         dieRoot.transform.localPosition = localPos;
         dieRoot.transform.localScale = Vector3.one * 0.045f;
-        dieRoot.GetComponent<Renderer>().material = ivoryMat;
 
-        float o = 0.505f;
-        float s = 0.25f;
+        if (dicePrefab != null)
+        {
+            Renderer rootRend = dieRoot.GetComponent<Renderer>();
+            if (rootRend != null) rootRend.enabled = false;
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(0, o, 0));
+            GameObject visualDie = Instantiate(dicePrefab, dieRoot.transform);
+            visualDie.name = "Dice_Visual";
+            visualDie.transform.localPosition = Vector3.zero;
+            visualDie.transform.localRotation = Quaternion.identity;
+            StripRoguePhysicsFromImportedPrefab(visualDie);
+            NormalizePrefabSize(visualDie, 0.045f);
+        }
+        else
+        {
+            Material ivoryMat = CreateColoredMaterial(new Color(0.97f, 0.96f, 0.92f), 0.85f);
+            Material pipMat = CreateColoredMaterial(new Color(0.06f, 0.06f, 0.08f), 0.9f);
+            dieRoot.GetComponent<Renderer>().material = ivoryMat;
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, -s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, 0));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, -s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, 0));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, s));
+            float o = 0.505f;
+            float s = 0.25f;
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, o));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(0, o, 0));
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(0, 0, -o));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, -s, -o));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, -o));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, -o));
-        AddPip(dieRoot.transform, pipMat, new Vector3(s, s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, 0));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, 0));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, s));
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(o, 0, 0));
-        AddPip(dieRoot.transform, pipMat, new Vector3(o, s, s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(o, -s, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, o));
 
-        AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, -s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, -s));
-        AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(0, 0, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, s, -o));
+
+            AddPip(dieRoot.transform, pipMat, new Vector3(o, 0, 0));
+            AddPip(dieRoot.transform, pipMat, new Vector3(o, s, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(o, -s, -s));
+
+            AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, s));
+        }
 
         physDieComp = dieRoot.AddComponent<PhysicalThrowDie>();
         physDieComp.OnDieBounceImpact += (impactStrength) =>
@@ -3429,14 +3611,14 @@ public class TycoonBoardManager : MonoBehaviour
         procGlassShatterClip.SetData(shatterSamples, 0);
     }
 
-    void PlaySFX(AudioClip customClip, AudioClip fallbackClip, float pitch = 1f)
+    public void PlaySFX(AudioClip customClip, AudioClip fallbackClip, float pitch = 1f)
     {
         if (sfxSource == null) return;
         sfxSource.pitch = pitch;
         sfxSource.PlayOneShot(customClip != null ? customClip : fallbackClip);
     }
 
-    void PlayHaptic(float amplitude = 0.5f, float duration = 0.15f)
+    public void PlayHaptic(float amplitude = 0.5f, float duration = 0.15f)
     {
         try
         {
@@ -3444,6 +3626,24 @@ public class TycoonBoardManager : MonoBehaviour
             StartCoroutine(StopHapticAfter(duration));
         }
         catch { }
+    }
+
+    public void PlayDiceRattleSound()
+    {
+        PlaySFX(diceRollSound, procDiceClip, UnityEngine.Random.Range(0.95f, 1.25f));
+    }
+
+    public void TriggerPhysicsDiceRoll(bool useImpulseToss)
+    {
+        StartCoroutine(ExecutePhysicsDiceRollTurn(useImpulseToss));
+    }
+
+    public void PassTurnDecision()
+    {
+        if (tactileInteractions != null) tactileInteractions.DismissTradeContract();
+        HideDeedCard();
+        RefreshDashboard("PASSED ON DEED", "Passing turn to Rival Mogul...");
+        StartCoroutine(EndPlayerTurn(false));
     }
 
     IEnumerator StopHapticAfter(float delay)
@@ -3586,6 +3786,29 @@ public class TycoonBoardManager : MonoBehaviour
 
             board[i].tileTransform = plot.transform;
         }
+
+        SpawnCornerLandmark(0, goCornerLandmarkPrefab, "Landmark_Go_Market");
+        SpawnCornerLandmark(10, jailCornerLandmarkPrefab, "Landmark_Jail_PoliceStation");
+        SpawnCornerLandmark(20, freeParkingLandmarkPrefab, "Landmark_FreeParking_Hospital");
+        SpawnCornerLandmark(30, goToJailLandmarkPrefab, "Landmark_GoToJail_School");
+    }
+
+    void SpawnCornerLandmark(int cornerTileIdx, GameObject prefab, string landmarkName)
+    {
+        if (prefab == null || board[cornerTileIdx] == null || board[cornerTileIdx].tileTransform == null) return;
+        GameObject holder = new GameObject(landmarkName);
+        holder.transform.SetParent(transform, false);
+
+        Vector3 tilePos = board[cornerTileIdx].tileTransform.localPosition;
+        Vector3 inwardDir = -new Vector3(tilePos.x, 0f, tilePos.z).normalized;
+        holder.transform.localPosition = tilePos + inwardDir * 0.088f + new Vector3(0f, 0.012f, 0f);
+        holder.transform.localRotation = Quaternion.LookRotation(-inwardDir, Vector3.up);
+
+        GameObject instance = Instantiate(prefab, holder.transform);
+        instance.transform.localPosition = Vector3.zero;
+        instance.transform.localRotation = Quaternion.identity;
+        StripRoguePhysicsFromImportedPrefab(instance);
+        NormalizePrefabSize(instance, 0.075f);
     }
 
     Color GetOfficialColor(BoardTile tile)
@@ -3852,6 +4075,12 @@ public class TycoonBoardManager : MonoBehaviour
         BoardTile tile = board[playerPos[playerIdx]];
         string who = (playerIdx == 0) ? "YOU" : GetPlayerName(playerIdx).ToUpper();
 
+        if (tile != null && tile.tileTransform != null)
+        {
+            Renderer tr = tile.tileTransform.GetComponent<Renderer>();
+            if (tr != null) FlashRendererDynamicColor(tr, Color.cyan, 0.45f);
+        }
+
         switch (tile.type)
         {
             case TileType.Property:
@@ -3868,8 +4097,17 @@ public class TycoonBoardManager : MonoBehaviour
                             SetRivalReaction(1, AvatarMood.Thinking, $"Thinking about buying {tile.name}?");
                             RefreshDashboard(
                                 $"LANDED ON {tile.name} (${tile.price})",
-                                "Right Pinch to Distance-Pull the 3D Deed Crystal (or touch [BUY DEED]) | Left Pinch to Pass"
+                                "Stamp Seal or Right Pinch to BUY | Rip Contract or Left Pinch to PASS"
                             );
+                            if (tactileInteractions != null)
+                            {
+                                tactileInteractions.SpawnExecutiveTradeContract(
+                                    $"ACQUISITION: {tile.name.ToUpper()}",
+                                    $"Price: ${tile.price}  |  Type: {tile.type}\nYour Cash: ${playerCash[0]}\n\nStamp wax seal to buy, or rip contract apart to pass!",
+                                    () => { PurchaseCurrentTile(0); },
+                                    () => { PassTurnDecision(); }
+                                );
+                            }
                             yield break;
                         }
                         else
@@ -4047,7 +4285,7 @@ public class TycoonBoardManager : MonoBehaviour
         yield return new WaitForSeconds(1.3f);
     }
 
-    void PurchaseCurrentTile(int playerIdx)
+    public void PurchaseCurrentTile(int playerIdx)
     {
         BoardTile tile = board[playerPos[playerIdx]];
         if (playerCash[playerIdx] < tile.price) return;
@@ -4056,6 +4294,7 @@ public class TycoonBoardManager : MonoBehaviour
         tile.owner = playerIdx;
         PlaySFX(cashRegisterSound, procCashClip, 1.0f);
         HideDeedCard();
+        if (tactileInteractions != null) tactileInteractions.DismissTradeContract();
 
         StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, tile.tileTransform.position, 6));
 
@@ -5156,7 +5395,7 @@ public class TycoonBoardManager : MonoBehaviour
         dashboardStatsTMP.text = statsLine;
     }
 
-    void RefreshDashboard(string eventHeadline, string promptLine)
+    public void RefreshDashboard(string eventHeadline, string promptLine)
     {
         if (dashboardTitleTMP != null)
         {
@@ -5252,4 +5491,89 @@ public class TycoonBoardManager : MonoBehaviour
         }
         passthroughLayer.textureOpacity = targetOpacity;
     }
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        AutoPopulateEmptyPrefabs();
+    }
+
+    [ContextMenu("Auto-Populate City Asset Prefabs")]
+    public void AutoPopulateEmptyPrefabs()
+    {
+        // 1. Dice
+        if (dicePrefab == null)
+            dicePrefab = FindPrefabByNameOrFilter("Dice_d6_Plastic Glossy Pure write", "Dice_d6");
+
+        // 2. Levels 1 to 5 Houses & Skyscraper
+        if (level1HousePrefab == null)
+            level1HousePrefab = FindPrefabByNameOrFilter("House_01", "Env_ResidentBuilding_04", "Building_House_01_color01");
+        if (level2HousePrefab == null)
+            level2HousePrefab = FindPrefabByNameOrFilter("Building_House_03_color01", "House_02", "Env_ResidentBuilding_02");
+        if (level3HousePrefab == null)
+            level3HousePrefab = FindPrefabByNameOrFilter("Corner Building", "House_04", "Building_House_04_color01");
+        if (level4HousePrefab == null)
+            level4HousePrefab = FindPrefabByNameOrFilter("Eco_Building_Slope", "Red Building", "Building_Residential_color01");
+        if (level5SkyscraperPrefab == null)
+            level5SkyscraperPrefab = FindPrefabByNameOrFilter("Eco_Building_Grid", "Regular_Building_TwistedTower_Large", "Building Sky_big_color01");
+
+        // 3. Vehicles & Player Tokens
+        if (playerTokenPrefab == null)
+            playerTokenPrefab = FindPrefabByNameOrFilter("Car_13", "Vehicle_Police Car_separate");
+        if (aiRivalTokenPrefab == null)
+            aiRivalTokenPrefab = FindPrefabByNameOrFilter("Vehicle_Police Car_separate", "Car_06");
+        if (rival2TokenPrefab == null)
+            rival2TokenPrefab = FindPrefabByNameOrFilter("Van", "Car_16");
+        if (rival3TokenPrefab == null)
+            rival3TokenPrefab = FindPrefabByNameOrFilter("Car_19", "Futuristic_Car_1");
+
+        // 4. 4 Corner Landmarks
+        if (goCornerLandmarkPrefab == null)
+            goCornerLandmarkPrefab = FindPrefabByNameOrFilter("Market", "Building_Super Market");
+        if (jailCornerLandmarkPrefab == null)
+            jailCornerLandmarkPrefab = FindPrefabByNameOrFilter("Police_Station");
+        if (freeParkingLandmarkPrefab == null)
+            freeParkingLandmarkPrefab = FindPrefabByNameOrFilter("Hospital", "Fire Station", "Building_Gas Station");
+        if (goToJailLandmarkPrefab == null)
+            goToJailLandmarkPrefab = FindPrefabByNameOrFilter("School", "Building_Factory");
+
+        // 5. Roads & Billboards
+        if (roadStraightPrefab == null)
+            roadStraightPrefab = FindPrefabByNameOrFilter("Road Lane_01", "road_001", "Env_Road_Straight_01");
+        if (billboardPropPrefab == null)
+            billboardPropPrefab = FindPrefabByNameOrFilter("Billboard_4x1_03", "Billboard_2x1_03", "Signboard_01");
+
+        // 6. Courtyard Elements
+        if (parkTreePrefab == null)
+            parkTreePrefab = FindPrefabByNameOrFilter("Natures_Big Tree", "Prop_Tree_01", "Palm_03");
+        if (parkCenterpiecePrefab == null)
+            parkCenterpiecePrefab = FindPrefabByNameOrFilter("Fountain_03", "Natures_Pot Bush_big");
+        if (streetlightPrefab == null)
+            streetlightPrefab = FindPrefabByNameOrFilter("Spotlight_01", "traffic_light_001");
+        if (ambientTrafficCar1Prefab == null)
+            ambientTrafficCar1Prefab = FindPrefabByNameOrFilter("Car_16", "Car_13");
+        if (ambientTrafficCar2Prefab == null)
+            ambientTrafficCar2Prefab = FindPrefabByNameOrFilter("Futuristic_Car_1", "Car_06");
+
+        UnityEditor.EditorUtility.SetDirty(this);
+    }
+
+    private GameObject FindPrefabByNameOrFilter(params string[] targetNames)
+    {
+        foreach (string name in targetNames)
+        {
+            string[] guids = UnityEditor.AssetDatabase.FindAssets($"{name} t:Prefab");
+            foreach (string guid in guids)
+            {
+                string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
+                if (path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    GameObject go = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                    if (go != null) return go;
+                }
+            }
+        }
+        return null;
+    }
+#endif
 }

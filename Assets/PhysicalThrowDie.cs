@@ -129,6 +129,31 @@ public class PhysicalThrowDie : MonoBehaviour
         rollTimer = 0f;
     }
 
+    public void LaunchWithDirectVelocity(Vector3 velocity, Vector3 boardCenterWorld)
+    {
+        isHeldByPlayer = false;
+        trackedHandGrabber = null;
+        rb.isKinematic = false;
+
+        Vector3 toCenter = (boardCenterWorld - transform.position);
+        toCenter.y = 0f;
+        Vector3 rawThrow = velocity * throwForceMultiplier;
+
+        if (rawThrow.magnitude < 0.35f)
+        {
+            rawThrow = toCenter.normalized * 0.95f + new Vector3(UnityEngine.Random.Range(-0.2f, 0.2f), 0f, UnityEngine.Random.Range(-0.2f, 0.2f));
+        }
+
+        Vector3 finalVel = Vector3.ClampMagnitude(rawThrow, maxThrowSpeed);
+        finalVel.y = Mathf.Clamp(finalVel.y + throwUpwardArc, 0.35f, 1.8f);
+
+        rb.linearVelocity = finalVel;
+        rb.angularVelocity = UnityEngine.Random.onUnitSphere * 26f;
+
+        isRolling = true;
+        rollTimer = 0f;
+    }
+
     void FixedUpdate()
     {
         if (isRolling && !rb.isKinematic)
