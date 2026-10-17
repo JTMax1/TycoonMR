@@ -2471,7 +2471,7 @@ public class TycoonBoardManager : MonoBehaviour
         ptLight.type = LightType.Point;
         ptLight.color = new Color(1f, 0.85f, 0.55f);
         ptLight.range = 0.45f;
-        ptLight.intensity = 0.06f;
+        ptLight.intensity = 0.03f;
         cityNightLights.Add(ptLight);
     }
 
@@ -5419,7 +5419,7 @@ public class TycoonBoardManager : MonoBehaviour
         isMarketNightMode = !isMarketNightMode;
         foreach (Light l in cityNightLights)
         {
-            if (l != null) l.intensity = isMarketNightMode ? 0.15f : 0.06f;
+            if (l != null) l.intensity = isMarketNightMode ? 0.07f : 0.03f;
         }
         if (passthroughLayer != null)
         {
