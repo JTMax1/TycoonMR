@@ -1595,6 +1595,14 @@ MonoBehaviour:
   goToJailLandmarkPrefab: {fileID: 1295220564887911823, guid: 8bf27f8a5975e1f4e9160e979cfcb02b, type: 3}
   roadStraightPrefab: {fileID: 100000, guid: 4f32dfddb033d3e40b5841bc53cc1689, type: 3}
   billboardPropPrefab: {fileID: 3934781833859567844, guid: ccfe0baf0137c8f4a92d8f08c09c2a8d, type: 3}
+  tradeContractPrefab: {fileID: 2187985784747431953, guid: d8e4e852fa9d6f547bc0edab81db687c, type: 3}
+  waxSealStampPrefab: {fileID: 0}
+  auctionGavelPrefab: {fileID: 602622052190468803, guid: cace3be87f734094f9d915a196eb877b, type: 3}
+  cashBriefcasePrefab: {fileID: 1321400763242450216, guid: 47c725d3548d6384192e503e2e7aa339, type: 3}
+  bankVaultPrefab: {fileID: 4517726551017671740, guid: 301b1a48426ce1e44a87f723128315b9, type: 3}
+  dollarBillPrefab: {fileID: 0}
+  padlockPrefab: {fileID: 6157252903731777712, guid: d54f30e32b931eb4c94f7b6c229366e4, type: 3}
+  steamPipeValvePrefab: {fileID: 4182609834740599872, guid: 7eed55408f5c314439b3cc196aca4b55, type: 3}
 --- !u!4 &1024132991
 Transform:
   m_ObjectHideFlags: 0
