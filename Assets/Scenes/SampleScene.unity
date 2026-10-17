@@ -1230,7 +1230,7 @@ MonoBehaviour:
   rival3TokenPrefab: {fileID: 1049787233113196042, guid: ff60e6cbfd0ed6e4bace0ea2a2f5a238, type: 3}
   playerTokenPrefabs: []
   rivalAvatarPrefab: {fileID: 5852302665562536657, guid: 8a189eef9ab90482cb647df9bccd7566, type: 3}
-  rival2AvatarPrefab: {fileID: 5852302665562536657, guid: 8a189eef9ab90482cb647df9bccd7566, type: 3}
+  rival2AvatarPrefab: {fileID: 0}
   rival3AvatarPrefab: {fileID: 0}
   rivalAvatarPrefabs: []
   level1HousePrefab: {fileID: 7674863563708117942, guid: bc4c98111a1d3884f9fcec8d2c53a76b, type: 3}
@@ -1243,7 +1243,7 @@ MonoBehaviour:
   streetlightPrefab: {fileID: 3351462997267180038, guid: ccab6c8306a6dae4d9688eb372e59639, type: 3}
   ambientTrafficCar1Prefab: {fileID: 787257008305991662, guid: 6fda6d14dbbf5c54fb01d830757a8d1f, type: 3}
   ambientTrafficCar2Prefab: {fileID: 52932905164622209, guid: 640b94cf88de4ef459ce14645b2736d9, type: 3}
-  vipHelicopterPrefab: {fileID: 7150096340317390813, guid: 076c23731e9bb48f283dc2de3f55c871, type: 3}
+  vipHelicopterPrefab: {fileID: 4750384685791112777, guid: 7f809d8f660724675b13c9e1920afa5a, type: 3}
   diceRollSound: {fileID: 8300000, guid: 33195832f936442e58c40fb62ab7af9e, type: 3}
   tokenMoveSound: {fileID: 0}
   cashRegisterSound: {fileID: 8300000, guid: 3f0309ebc419a4ce1a5ca9a77a3be477, type: 3}
