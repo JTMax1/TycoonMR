@@ -88,6 +88,9 @@ public class TycoonBoardManager : MonoBehaviour
     public GameObject padlockPrefab;
     public GameObject steamPipeValvePrefab;
     public GameObject jackpotChestPrefab;
+    public GameObject pedestrianPrefab;
+    public GameObject crosswalkPropPrefab;
+    public GameObject victoryTrophyPrefab;
 
     public enum TileType { Go, Property, Railroad, Utility, Tax, Chance, Chest, Jail, FreeParking, GoToJail }
 
@@ -153,6 +156,29 @@ public class TycoonBoardManager : MonoBehaviour
     public TycoonTactileInteractions TactileInteractions => tactileInteractions;
     private TycoonMinigameOrchestrator minigameOrchestrator;
     public TycoonMinigameOrchestrator MinigameOrchestrator => minigameOrchestrator;
+    private TycoonSpatialAnchorAndDiorama spatialAnchorAndDiorama;
+    public TycoonSpatialAnchorAndDiorama SpatialAnchorAndDiorama => spatialAnchorAndDiorama;
+    private TycoonExecutiveBriefcaseAndTrophy executiveBriefcaseAndTrophy;
+    public TycoonExecutiveBriefcaseAndTrophy ExecutiveBriefcaseAndTrophy => executiveBriefcaseAndTrophy;
+
+    public bool isPassAndPlayMode = false;
+    public Vector3 LockedBoardPosition { get => lockedBoardPosition; set { lockedBoardPosition = value; transform.position = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
+    public Quaternion LockedBoardRotation { get => lockedBoardRotation; set { lockedBoardRotation = value; transform.rotation = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
+    public void AddPlayerCash(int playerIdx, int delta)
+    {
+        if (playerCash != null && playerIdx >= 0 && playerIdx < playerCash.Length)
+        {
+            playerCash[playerIdx] += delta;
+            UpdateLiveHUDStats();
+        }
+    }
+    public int CurrentTurnPlayer { get; private set; } = 0;
+    public event System.Action<int> OnTurnStarted;
+    public event System.Action<int, int> OnRivalPaidRentToPlayer;
+    public event System.Action OnVictoryTrophyTriggered;
+    public event System.Action<Vector3, Quaternion> OnBoardPoseUpdated;
+    public bool CheckAllRivalsBankruptPublic() => CheckAllRivalsBankrupt();
+    public void TriggerVictoryTrophy() => OnVictoryTrophyTriggered?.Invoke();
     private GameObject jailLockpickButton;
     private bool isLockpickingInProgress = false;
 
@@ -481,6 +507,18 @@ public class TycoonBoardManager : MonoBehaviour
             minigameOrchestrator = gameObject.AddComponent<TycoonMinigameOrchestrator>();
         }
 
+        spatialAnchorAndDiorama = GetComponent<TycoonSpatialAnchorAndDiorama>();
+        if (spatialAnchorAndDiorama == null)
+        {
+            spatialAnchorAndDiorama = gameObject.AddComponent<TycoonSpatialAnchorAndDiorama>();
+        }
+
+        executiveBriefcaseAndTrophy = GetComponent<TycoonExecutiveBriefcaseAndTrophy>();
+        if (executiveBriefcaseAndTrophy == null)
+        {
+            executiveBriefcaseAndTrophy = gameObject.AddComponent<TycoonExecutiveBriefcaseAndTrophy>();
+        }
+
         CacheMetaInteractionSDKHands();
         InitializeOfficialMonopolyMap();
         Build40TileClockwiseTable();
@@ -592,6 +630,7 @@ public class TycoonBoardManager : MonoBehaviour
         transform.position = lockedBoardPosition;
         transform.rotation = lockedBoardRotation;
         hasLockedInitialPose = true;
+        OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation);
     }
 
     public void AdjustBoardScale(float delta)
@@ -1811,6 +1850,7 @@ public class TycoonBoardManager : MonoBehaviour
     {
         lockedBoardPosition.y = deskHeight;
         transform.position = lockedBoardPosition;
+        OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation);
         SaveGameState();
         PlaySFX(cashRegisterSound, procBuildClip, 1.2f);
         PlayHaptic(0.5f, 0.2f);
@@ -3627,6 +3667,8 @@ public class TycoonBoardManager : MonoBehaviour
         SpawnCelebrationFireworks(transform.position + Vector3.up * 0.35f);
 
         currentState = TurnState.WaitingForRoll;
+        CurrentTurnPlayer = 0;
+        OnTurnStarted?.Invoke(0);
         UpdateLiveHUDStats();
         RefreshDashboard(
             "MATCH LAUNCHED — YOUR TURN!",
@@ -4347,7 +4389,10 @@ public class TycoonBoardManager : MonoBehaviour
                     else
                     {
                         if (tile.owner == 0)
+                        {
                             SetRivalReaction(playerIdx, AvatarMood.AngrySlam, $"Ugh! Paid you ${rent} rent on {tile.name}!");
+                            OnRivalPaidRentToPlayer?.Invoke(playerIdx, rent);
+                        }
                         else
                             SetRivalReaction(playerIdx, AvatarMood.Thinking, $"Paid ${rent} rent to {GetPlayerName(tile.owner)} on {tile.name}.");
                     }
@@ -5145,6 +5190,7 @@ public class TycoonBoardManager : MonoBehaviour
             SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
             RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
             SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
+            OnVictoryTrophyTriggered?.Invoke();
             currentState = TurnState.WaitingForRoll;
             yield break;
         }
@@ -5152,6 +5198,8 @@ public class TycoonBoardManager : MonoBehaviour
         if (playerRolledDoubles && !inJail[0])
         {
             currentState = TurnState.WaitingForRoll;
+            CurrentTurnPlayer = 0;
+            OnTurnStarted?.Invoke(0);
             RefreshDashboard("DOUBLES BONUS ROLL!", "Pinch to Distance-Pull & Throw the 3D Dice again!");
             yield break;
         }
@@ -5163,6 +5211,8 @@ public class TycoonBoardManager : MonoBehaviour
         for (int aiIdx = 1; aiIdx < activePlayerCount; aiIdx++)
         {
             if (isBankrupt[aiIdx]) continue;
+            CurrentTurnPlayer = aiIdx;
+            OnTurnStarted?.Invoke(aiIdx);
 
             SetRivalReaction(aiIdx, AvatarMood.Thinking, $"{GetPlayerName(aiIdx)}: My turn! Analyzing the board...");
             yield return new WaitForSeconds(0.65f);
@@ -5206,6 +5256,7 @@ public class TycoonBoardManager : MonoBehaviour
                         SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
                         RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
                         SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
+                        OnVictoryTrophyTriggered?.Invoke();
                         currentState = TurnState.WaitingForRoll;
                         yield break;
                     }
@@ -5224,6 +5275,8 @@ public class TycoonBoardManager : MonoBehaviour
         SaveGameState();
 
         currentState = TurnState.WaitingForRoll;
+        CurrentTurnPlayer = 0;
+        OnTurnStarted?.Invoke(0);
         if (inJail[0])
         {
             RefreshDashboard("IN JAIL!", "IN JAIL! POKE [BUY DEED] TO PAY $50 BAIL NOW, OR THROW DICE FOR DOUBLES!");
@@ -5922,6 +5975,12 @@ public class TycoonBoardManager : MonoBehaviour
             steamPipeValvePrefab = FindPrefabByNameOrFilter("SteamValve", "Valve", "Pipe", "Faucet", "Prop_Faucet_06", "Props_Hydrant");
         if (jackpotChestPrefab == null)
             jackpotChestPrefab = FindPrefabByNameOrFilter("Chest", "TreasureChest", "Box_01", "Crate_01", "Prop_SmallStorageBox_01");
+        if (pedestrianPrefab == null)
+            pedestrianPrefab = FindPrefabByNameOrFilter("Character", "Person", "Pedestrian", "Citizen");
+        if (crosswalkPropPrefab == null)
+            crosswalkPropPrefab = FindPrefabByNameOrFilter("Crosswalk", "Road_Crosswalk");
+        if (victoryTrophyPrefab == null)
+            victoryTrophyPrefab = FindPrefabByNameOrFilter("Trophy", "Cup", "Statue", "Award");
 
         UnityEditor.EditorUtility.SetDirty(this);
     }
@@ -5930,14 +5989,14 @@ public class TycoonBoardManager : MonoBehaviour
     {
         foreach (string name in targetNames)
         {
-            string[] guids = UnityEditor.AssetDatabase.FindAssets($"{name} t:Prefab");
+            string[] guids = UnityEditor.AssetDatabase.FindAssets($"{name} t:Prefab", new string[] { "Assets" });
             foreach (string guid in guids)
             {
                 string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
                 if (path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
                 {
                     GameObject go = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                    if (go != null) return go;
+                    if (go != null && go.GetComponentInChildren<Renderer>(true) != null) return go;
                 }
             }
         }
