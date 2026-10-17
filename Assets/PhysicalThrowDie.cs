@@ -267,8 +267,8 @@ public class PhysicalThrowDie : MonoBehaviour
         {
             transform.forward,  // Face 1 (+Z)
             transform.up,       // Face 2 (+Y)
-            transform.right,    // Face 3 (+X)
-            -transform.right,   // Face 4 (-X)
+            -transform.right,   // Face 3 (-X)
+            transform.right,    // Face 4 (+X)
             -transform.up,      // Face 5 (-Y)
             -transform.forward  // Face 6 (-Z)
         };

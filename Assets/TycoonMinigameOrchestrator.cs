@@ -125,9 +125,9 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
         }
 
         // HUD Text
-        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.22f, 0f), "BANK ERROR IN YOUR FAVOR!", 34, new Color(1f, 0.85f, 0.30f));
-        TextMeshProUGUI counterTMP = CreateHoloText(activeMinigameRoot.transform, "Counter", new Vector3(0f, 0.16f, 0f), "SWAT FLYING CASH! Swatted: 0 | Time: 8.0s", 25, Color.white);
-        TextMeshProUGUI payoutTMP = CreateHoloText(activeMinigameRoot.transform, "Payout", new Vector3(0f, -0.18f, 0f), "Guaranteed Base: $100 (+$25 / bill swatted)", 22, new Color(0.4f, 0.95f, 0.6f));
+        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.22f, -0.02f), "BANK ERROR IN YOUR FAVOR!", 34, new Color(1f, 0.85f, 0.30f));
+        TextMeshProUGUI counterTMP = CreateHoloText(activeMinigameRoot.transform, "Counter", new Vector3(0f, 0.16f, -0.02f), "SWAT FLYING CASH! Swatted: 0 | Time: 8.0s", 25, Color.white);
+        TextMeshProUGUI payoutTMP = CreateHoloText(activeMinigameRoot.transform, "Payout", new Vector3(0f, -0.18f, -0.02f), "Guaranteed Base: $100 (+$25 / bill swatted)", 22, new Color(0.4f, 0.95f, 0.6f));
 
         boardManager.PlaySFX(boardManager.CashRegisterSound, null, 1.2f);
         boardManager.PlayHaptic(0.5f, 0.15f);
@@ -342,8 +342,8 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
         shearLine.GetComponent<Renderer>().material = neonLineMat;
 
         // HUD Text
-        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.25f, 0f), "THE GREAT ESCAPE — LOCKPICK", 34, new Color(1f, 0.85f, 0.30f));
-        TextMeshProUGUI promptTMP = CreateHoloText(activeMinigameRoot.transform, "Prompt", new Vector3(0f, -0.19f, 0f), "POKE EACH PIN WHEN AT GREEN LINE!\n(Locks: 0/3 | Time: 10.0s)", 23, Color.white);
+        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.25f, -0.02f), "THE GREAT ESCAPE — LOCKPICK", 34, new Color(1f, 0.85f, 0.30f));
+        TextMeshProUGUI promptTMP = CreateHoloText(activeMinigameRoot.transform, "Prompt", new Vector3(0f, -0.19f, -0.02f), "POKE EACH PIN WHEN AT GREEN LINE!\n(Locks: 0/3 | Time: 10.0s)", 23, Color.white);
 
         // 3 Oscillating Tumbler Pins
         List<LockpickPin> pins = new List<LockpickPin>();
@@ -509,8 +509,8 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
         }
 
         // HUD Text
-        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.22f, 0f), "BURST PIPE EMERGENCY!", 34, new Color(1f, 0.45f, 0.35f));
-        TextMeshProUGUI promptTMP = CreateHoloText(activeMinigameRoot.transform, "Prompt", new Vector3(0f, -0.19f, 0f), "SHUT OFF 3 PRESSURE VALVES! (Saves $30/valve)\nValves Closed: 0/3 | Time: 7.0s", 23, Color.white);
+        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.22f, -0.02f), "BURST PIPE EMERGENCY!", 34, new Color(1f, 0.45f, 0.35f));
+        TextMeshProUGUI promptTMP = CreateHoloText(activeMinigameRoot.transform, "Prompt", new Vector3(0f, -0.19f, -0.02f), "SHUT OFF 3 PRESSURE VALVES! (Saves $30/valve)\nValves Closed: 0/3 | Time: 7.0s", 23, Color.white);
 
         // 3 Pressure Valves & Steam Plumes
         List<PipeValve> valves = new List<PipeValve>();

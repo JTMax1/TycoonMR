@@ -87,6 +87,7 @@ public class TycoonBoardManager : MonoBehaviour
     public GameObject dollarBillPrefab;
     public GameObject padlockPrefab;
     public GameObject steamPipeValvePrefab;
+    public GameObject jackpotChestPrefab;
 
     public enum TileType { Go, Property, Railroad, Utility, Tax, Chance, Chest, Jail, FreeParking, GoToJail }
 
@@ -307,7 +308,8 @@ public class TycoonBoardManager : MonoBehaviour
         float targetY = Mathf.Max(boardPos.y + (heightAboveTable * currentBoardScale), eyePos.y - 0.18f);
         Vector3 targetPos = new Vector3(targetHorizPos.x, targetY, targetHorizPos.z);
 
-        float yaw = Mathf.Atan2(toPlayerHoriz.x, toPlayerHoriz.z) * Mathf.Rad2Deg;
+        // Local -Z faces the player, so forward (+Z) points into the board (-toPlayerHoriz)
+        float yaw = Mathf.Atan2(-toPlayerHoriz.x, -toPlayerHoriz.z) * Mathf.Rad2Deg;
         Quaternion targetRot = Quaternion.Euler(15f, yaw, 0f);
 
         return (targetPos, targetRot);
@@ -322,9 +324,9 @@ public class TycoonBoardManager : MonoBehaviour
         foreach (GameObject go in allObjects)
         {
             if (go == null) continue;
-            if (go.name == "[BuildingBlock] Cube" && buildingBlockGrabTemplate == null)
+            if (go.name == "[BuildingBlock] Cube")
             {
-                buildingBlockGrabTemplate = go;
+                if (buildingBlockGrabTemplate == null) buildingBlockGrabTemplate = go;
                 go.SetActive(false);
             }
             else if (go.name.Contains("PokeInteraction") && buildingBlockPokeTemplate == null)
@@ -333,10 +335,34 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
 
+        FixMicrogestureEventSources();
+
         Rigidbody boardRb = GetComponent<Rigidbody>();
         if (boardRb != null) Destroy(boardRb);
 
         EnforceUnderlayPassthrough();
+    }
+
+    void FixMicrogestureEventSources()
+    {
+        OVRMicrogestureEventSource[] sources = FindObjectsByType<OVRMicrogestureEventSource>(FindObjectsInactive.Include);
+        foreach (var src in sources)
+        {
+            if (src == null) continue;
+            if (src.Hand == null)
+            {
+                OVRHand hand = src.GetComponentInParent<OVRHand>();
+                if (hand == null) hand = src.GetComponentInChildren<OVRHand>();
+                if (hand != null)
+                {
+                    src.Hand = hand;
+                }
+                else
+                {
+                    src.enabled = false;
+                }
+            }
+        }
     }
 
     public void AttachNativeBuildingBlockGrab(GameObject targetObj, Rigidbody targetRb = null)
@@ -945,6 +971,7 @@ public class TycoonBoardManager : MonoBehaviour
 
     void Update()
     {
+        if (Time.frameCount % 90 == 0) FixMicrogestureEventSources();
         UpdateAmbientCourtyardTrafficAndChopper();
         AnimateRivalMogulAvatar();
         AnimateFloatingDeedCrystal();
@@ -2383,14 +2410,64 @@ public class TycoonBoardManager : MonoBehaviour
         Destroy(helipad.GetComponent<Collider>());
         helipad.GetComponent<Renderer>().material = helipadMat;
 
-        GameObject jackpotObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        jackpotObj.name = "Free_Parking_Gold_Vault";
-        jackpotObj.transform.SetParent(courtyardRoot.transform, false);
-        jackpotObj.transform.localPosition = new Vector3(-0.22f, 0.038f, 0.22f);
-        jackpotObj.transform.localScale = new Vector3(0.055f, 0.018f, 0.055f);
-        Destroy(jackpotObj.GetComponent<Collider>());
-        jackpotObj.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.85f, 0.20f), 0.95f, 0.9f);
-        jackpotGoldPile = jackpotObj.transform;
+        GameObject chestRoot = new GameObject("Free_Parking_Jackpot_Chest");
+        chestRoot.transform.SetParent(courtyardRoot.transform, false);
+        // Placed along courtyard lawn path, completely separate from Hospital at NW (-0.18, 0.027, 0.18)
+        chestRoot.transform.localPosition = new Vector3(-0.13f, 0.028f, 0.08f);
+        chestRoot.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+
+        if (jackpotChestPrefab != null)
+        {
+            GameObject chestModel = Instantiate(jackpotChestPrefab, chestRoot.transform, false);
+            StripRoguePhysicsFromImportedPrefab(chestModel);
+            NormalizePrefabSize(chestModel, 0.065f);
+            chestModel.transform.localPosition = Vector3.zero;
+        }
+        else
+        {
+            // Procedural treasure chest: Wood base, golden trim, domed lid, lock
+            Material woodMat = CreateColoredMaterial(new Color(0.42f, 0.24f, 0.12f), 0.6f, 0.05f);
+            Material goldTrimMat = CreateColoredMaterial(new Color(1f, 0.85f, 0.22f), 0.95f, 0.85f);
+            Material metalLockMat = CreateColoredMaterial(new Color(0.85f, 0.88f, 0.92f), 0.9f, 0.8f);
+
+            GameObject baseBox = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            baseBox.transform.SetParent(chestRoot.transform, false);
+            baseBox.transform.localPosition = new Vector3(0f, 0.012f, 0f);
+            baseBox.transform.localScale = new Vector3(0.055f, 0.024f, 0.038f);
+            Destroy(baseBox.GetComponent<Collider>());
+            baseBox.GetComponent<Renderer>().material = woodMat;
+
+            GameObject lid = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            lid.transform.SetParent(chestRoot.transform, false);
+            lid.transform.localPosition = new Vector3(0f, 0.024f, 0f);
+            lid.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            lid.transform.localScale = new Vector3(0.038f, 0.028f, 0.038f);
+            Destroy(lid.GetComponent<Collider>());
+            lid.GetComponent<Renderer>().material = woodMat;
+
+            GameObject band1 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            band1.transform.SetParent(chestRoot.transform, false);
+            band1.transform.localPosition = new Vector3(-0.018f, 0.016f, 0f);
+            band1.transform.localScale = new Vector3(0.006f, 0.028f, 0.040f);
+            Destroy(band1.GetComponent<Collider>());
+            band1.GetComponent<Renderer>().material = goldTrimMat;
+
+            GameObject band2 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            band2.transform.SetParent(chestRoot.transform, false);
+            band2.transform.localPosition = new Vector3(0.018f, 0.016f, 0f);
+            band2.transform.localScale = new Vector3(0.006f, 0.028f, 0.040f);
+            Destroy(band2.GetComponent<Collider>());
+            band2.GetComponent<Renderer>().material = goldTrimMat;
+
+            GameObject lockLatch = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            lockLatch.transform.SetParent(chestRoot.transform, false);
+            lockLatch.transform.localPosition = new Vector3(0f, 0.018f, -0.020f);
+            lockLatch.transform.localScale = new Vector3(0.008f, 0.010f, 0.004f);
+            Destroy(lockLatch.GetComponent<Collider>());
+            lockLatch.GetComponent<Renderer>().material = metalLockMat;
+        }
+
+        jackpotGoldPile = chestRoot.transform;
 
         SpawnVIPHelicopter(courtyardRoot.transform);
 
@@ -3905,19 +3982,19 @@ public class TycoonBoardManager : MonoBehaviour
         switch (cornerTileIdx)
         {
             case 0: // GO - South-East
-                localPos = new Vector3(0.20f, 0.028f, -0.20f);
+                localPos = new Vector3(0.18f, 0.027f, -0.18f);
                 localRot = Quaternion.Euler(0f, -90f, 0f);
                 break;
             case 10: // Jail - South-West
-                localPos = new Vector3(-0.20f, 0.028f, -0.20f);
+                localPos = new Vector3(-0.18f, 0.027f, -0.18f);
                 localRot = Quaternion.Euler(0f, 0f, 0f);
                 break;
-            case 20: // Free Parking - North-West
-                localPos = new Vector3(-0.20f, 0.028f, 0.20f);
+            case 20: // Free Parking - North-West (Hospital)
+                localPos = new Vector3(-0.18f, 0.027f, 0.18f);
                 localRot = Quaternion.Euler(0f, 90f, 0f);
                 break;
-            case 30: // Go To Jail - North-East
-                localPos = new Vector3(0.20f, 0.028f, 0.20f);
+            case 30: // Go To Jail - North-East (School)
+                localPos = new Vector3(0.18f, 0.027f, 0.18f);
                 localRot = Quaternion.Euler(0f, 180f, 0f);
                 break;
             default:
@@ -3941,7 +4018,6 @@ public class TycoonBoardManager : MonoBehaviour
             Bounds b = renderers[0].bounds;
             for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
             float bottomOffsetWorld = holder.transform.position.y - b.min.y;
-            bottomOffsetWorld -= (0.005f * transform.lossyScale.y);
             instance.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
         }
     }
@@ -4686,7 +4762,6 @@ public class TycoonBoardManager : MonoBehaviour
                 b = renderers[0].bounds;
                 for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
                 float bottomOffsetWorld = holder.position.y - b.min.y;
-                bottomOffsetWorld -= (0.005f * transform.lossyScale.y);
                 model.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
             }
         }
@@ -5849,6 +5924,8 @@ public class TycoonBoardManager : MonoBehaviour
             padlockPrefab = FindPrefabByNameOrFilter("Padlock", "Lock", "Key");
         if (steamPipeValvePrefab == null)
             steamPipeValvePrefab = FindPrefabByNameOrFilter("SteamValve", "Valve", "Pipe", "Faucet", "Prop_Faucet_06", "Props_Hydrant");
+        if (jackpotChestPrefab == null)
+            jackpotChestPrefab = FindPrefabByNameOrFilter("Chest", "TreasureChest", "Box_01", "Crate_01", "Prop_SmallStorageBox_01");
 
         UnityEditor.EditorUtility.SetDirty(this);
     }

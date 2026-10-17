@@ -651,7 +651,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &485402871
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1603,6 +1603,7 @@ MonoBehaviour:
   dollarBillPrefab: {fileID: 0}
   padlockPrefab: {fileID: 6157252903731777712, guid: d54f30e32b931eb4c94f7b6c229366e4, type: 3}
   steamPipeValvePrefab: {fileID: 4182609834740599872, guid: 7eed55408f5c314439b3cc196aca4b55, type: 3}
+  jackpotChestPrefab: {fileID: 5743622748653743421, guid: 5cd6bc82604284345b4d21adede7e865, type: 3}
 --- !u!4 &1024132991
 Transform:
   m_ObjectHideFlags: 0
@@ -2262,7 +2263,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1401919183
 MonoBehaviour:
   m_ObjectHideFlags: 0
