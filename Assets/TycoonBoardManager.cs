@@ -136,6 +136,16 @@ public class TycoonBoardManager : MonoBehaviour
     private AvatarMood[] currentRivalMoods = new AvatarMood[4] { AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral, AvatarMood.Neutral };
     private float[] moodResetTimers = new float[4];
 
+    // Phase 10 & 11: Spatial AI Voice Synth, District Soundscapes & 3D Laser Jail Cages
+    private AudioSource[] rivalVoiceSources = new AudioSource[4];
+    private AudioClip procVoiceAlpha;
+    private AudioClip procVoiceBeta;
+    private AudioClip procVoiceGamma;
+    private AudioClip procSirenClip;
+    private AudioClip procChopperHumClip;
+    private AudioClip procGlassShatterClip;
+    private GameObject[] jailCageHolders = new GameObject[4];
+
     // Legacy single avatar references for backwards compatibility
     private Transform rivalAvatarRoot;
     private Transform rivalHeadTransform;
@@ -308,7 +318,9 @@ public class TycoonBoardManager : MonoBehaviour
 
    void EnforceUnderlayPassthrough()
     {
-        OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>();
+#pragma warning disable CS0618
+        OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>(FindObjectsSortMode.None);
+#pragma warning restore CS0618
         for (int i = 0; i < layers.Length; i++)
         {
             if (layers[i] == null) continue;
@@ -543,8 +555,10 @@ public class TycoonBoardManager : MonoBehaviour
 
     void CacheMetaInteractionSDKHands()
     {
-        scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>();
-        sceneOVRHands = Object.FindObjectsByType<OVRHand>();
+#pragma warning disable CS0618
+        scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>(FindObjectsSortMode.None);
+        sceneOVRHands = Object.FindObjectsByType<OVRHand>(FindObjectsSortMode.None);
+#pragma warning restore CS0618
 
         if (activeHandGrabTransform == null)
         {
@@ -597,7 +611,9 @@ public class TycoonBoardManager : MonoBehaviour
         // 1. Read Index Fingertip Poke Positions directly from Meta's PokeInteractor (Interactions Rig)!
         if (scenePokeInteractors == null || scenePokeInteractors.Length == 0)
         {
-            scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>();
+#pragma warning disable CS0618
+            scenePokeInteractors = Object.FindObjectsByType<PokeInteractor>(FindObjectsSortMode.None);
+#pragma warning restore CS0618
         }
 
         if (scenePokeInteractors != null)
@@ -643,7 +659,9 @@ public class TycoonBoardManager : MonoBehaviour
         // 2. Read Pinch Gestures & Hand Positions from Meta's OVRHand (BuildingBlock Hand Tracking / Real Hands)
         if (sceneOVRHands == null || sceneOVRHands.Length == 0)
         {
-            sceneOVRHands = Object.FindObjectsByType<OVRHand>();
+#pragma warning disable CS0618
+            sceneOVRHands = Object.FindObjectsByType<OVRHand>(FindObjectsSortMode.None);
+#pragma warning restore CS0618
         }
 
         if (sceneOVRHands != null)
@@ -985,7 +1003,18 @@ public class TycoonBoardManager : MonoBehaviour
 
         if (currentState == TurnState.WaitingForRoll && !isPlayerHoldingDice)
         {
-            if (spacePressed)
+            if (inJail[0] && (buyPressed || (Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame)))
+            {
+                playerCash[0] -= 50;
+                freeParkingJackpot += 50;
+                inJail[0] = false;
+                ShatterJailCage(0);
+                PlaySFX(cashRegisterSound, procCashClip, 1.2f);
+                PlayHaptic(0.5f, 0.2f);
+                RefreshDashboard("PAID $50 BAIL!", "Laser Cage shattered! Free from Jail! Distance-Grab & Throw the dice!");
+                UpdateLiveHUDStats();
+            }
+            else if (spacePressed)
             {
                 StartCoroutine(ExecutePhysicsDiceRollTurn(true));
             }
@@ -1353,6 +1382,14 @@ public class TycoonBoardManager : MonoBehaviour
         rivalSpeechBubbles[p] = CreateUGUIText(bubbleCanvas.transform, "BubbleText", Vector2.zero, 30, sigColor);
         rivalSpeechBubbles[p].text = $"{aiName}: \"Let's see what you've got!\"";
 
+        AudioSource vSource = avatarHolder.AddComponent<AudioSource>();
+        vSource.spatialBlend = 0.85f;
+        vSource.playOnAwake = false;
+        vSource.minDistance = 0.2f;
+        vSource.maxDistance = 3.5f;
+        vSource.rolloffMode = AudioRolloffMode.Logarithmic;
+        rivalVoiceSources[p] = vSource;
+
         if (p == 1)
         {
             rivalAvatarRoot = rivalAvatarRoots[1];
@@ -1361,6 +1398,53 @@ public class TycoonBoardManager : MonoBehaviour
             rivalRightHandTransform = rivalRightHands[1];
             rivalVisorRenderer = rivalVisorRenderers[1];
             rivalSpeechBubbleTMP = rivalSpeechBubbles[1];
+        }
+    }
+
+    void PlayRivalVoiceCadence(int aiPlayerIdx, AvatarMood mood)
+    {
+        if (aiPlayerIdx < 1 || aiPlayerIdx > 3) return;
+        if (rivalVoiceSources[aiPlayerIdx] == null) return;
+        StartCoroutine(VoiceCadenceCoroutine(aiPlayerIdx, mood));
+    }
+
+    IEnumerator VoiceCadenceCoroutine(int aiIdx, AvatarMood mood)
+    {
+        AudioSource src = rivalVoiceSources[aiIdx];
+        if (src == null) yield break;
+
+        AudioClip clip = (aiIdx == 1) ? procVoiceAlpha : ((aiIdx == 2) ? procVoiceBeta : procVoiceGamma);
+        if (clip == null) yield break;
+
+        float[] pitches;
+        float delay;
+
+        switch (mood)
+        {
+            case AvatarMood.HappyCheer:
+                pitches = new float[] { 1.0f, 1.18f, 1.35f };
+                delay = 0.085f;
+                break;
+            case AvatarMood.AngrySlam:
+                pitches = new float[] { 0.95f, 0.85f, 0.75f };
+                delay = 0.075f;
+                break;
+            case AvatarMood.Thinking:
+                pitches = new float[] { 1.02f, 0.98f, 1.04f };
+                delay = 0.11f;
+                break;
+            default:
+                pitches = new float[] { 1.0f, 1.05f, 1.0f };
+                delay = 0.09f;
+                break;
+        }
+
+        for (int i = 0; i < pitches.Length; i++)
+        {
+            if (src == null) yield break;
+            src.pitch = pitches[i];
+            src.PlayOneShot(clip, 0.85f);
+            yield return new WaitForSeconds(delay);
         }
     }
 
@@ -1383,6 +1467,8 @@ public class TycoonBoardManager : MonoBehaviour
             else if (mood == AvatarMood.Thinking) visorCol = new Color(1f, 0.84f, 0.20f);
             rivalVisorRenderers[aiPlayerIdx].material = CreateColoredMaterial(visorCol, 0.95f);
         }
+
+        PlayRivalVoiceCadence(aiPlayerIdx, mood);
 
         if (aiPlayerIdx == 1)
         {
@@ -2106,6 +2192,17 @@ public class TycoonBoardManager : MonoBehaviour
         chopperHolder.transform.SetParent(parent, false);
         chopperHolder.transform.localPosition = new Vector3(0f, 0.20f, 0f);
         vipChopperTransform = chopperHolder.transform;
+
+        AudioSource chopperAudio = chopperHolder.AddComponent<AudioSource>();
+        chopperAudio.clip = procChopperHumClip;
+        chopperAudio.loop = true;
+        chopperAudio.spatialBlend = 1.0f;
+        chopperAudio.volume = 0.08f;
+        chopperAudio.minDistance = 0.15f;
+        chopperAudio.maxDistance = 0.85f;
+        chopperAudio.rolloffMode = AudioRolloffMode.Logarithmic;
+        chopperAudio.playOnAwake = true;
+        if (procChopperHumClip != null) chopperAudio.Play();
 
         if (vipHelicopterPrefab != null && vipHelicopterPrefab.GetComponent<OVRCameraRig>() == null)
         {
@@ -3148,6 +3245,11 @@ public class TycoonBoardManager : MonoBehaviour
             playerPos[i] = 0;
             isBankrupt[i] = false;
             inJail[i] = false;
+            if (jailCageHolders[i] != null)
+            {
+                Destroy(jailCageHolders[i]);
+                jailCageHolders[i] = null;
+            }
             PositionTokenOnTile(i, 0);
         }
 
@@ -3238,6 +3340,93 @@ public class TycoonBoardManager : MonoBehaviour
         }
         procBuildClip = AudioClip.Create("ProcBuild", buildSamples.Length, 1, sampleRate, false);
         procBuildClip.SetData(buildSamples, 0);
+
+        // Player 1 (MOGUL ALPHA - North): Deep baritone executive synth (210 Hz - 280 Hz formant)
+        int alphaLen = sampleRate * 9 / 100;
+        float[] alphaSamples = new float[alphaLen];
+        for (int i = 0; i < alphaLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            float env = Mathf.Sin(Mathf.PI * (float)i / alphaLen);
+            float f0 = Mathf.Lerp(210f, 280f, (float)i / alphaLen);
+            alphaSamples[i] = (Mathf.Sin(2f * Mathf.PI * f0 * t) * 0.65f +
+                               Mathf.Sin(2f * Mathf.PI * (f0 * 2f) * t) * 0.25f +
+                               Mathf.Sin(2f * Mathf.PI * (f0 * 0.5f) * t) * 0.15f) * env * 0.5f;
+        }
+        procVoiceAlpha = AudioClip.Create("ProcVoiceAlpha", alphaLen, 1, sampleRate, false);
+        procVoiceAlpha.SetData(alphaSamples, 0);
+
+        // Player 2 (BARONESS BETA - West): Crisp, high-tech melodic synth (360 Hz - 480 Hz formant)
+        int betaLen = sampleRate * 8 / 100;
+        float[] betaSamples = new float[betaLen];
+        for (int i = 0; i < betaLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            float env = Mathf.Sin(Mathf.PI * (float)i / betaLen);
+            float f0 = Mathf.Lerp(360f, 480f, (float)i / betaLen);
+            float fm = Mathf.Sin(2f * Mathf.PI * (f0 * 2f) * t) * 0.8f;
+            betaSamples[i] = (Mathf.Sin(2f * Mathf.PI * f0 * t + fm) * 0.7f +
+                              Mathf.Sin(2f * Mathf.PI * (f0 * 1.5f) * t) * 0.3f) * env * 0.45f;
+        }
+        procVoiceBeta = AudioClip.Create("ProcVoiceBeta", betaLen, 1, sampleRate, false);
+        procVoiceBeta.SetData(betaSamples, 0);
+
+        // Player 3 (TITAN GAMMA - East): Warm, measured bass-baritone cadence (165 Hz - 220 Hz formant)
+        int gammaLen = sampleRate * 10 / 100;
+        float[] gammaSamples = new float[gammaLen];
+        for (int i = 0; i < gammaLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            float env = Mathf.Sin(Mathf.PI * (float)i / gammaLen);
+            float f0 = Mathf.Lerp(165f, 220f, (float)i / gammaLen);
+            gammaSamples[i] = (Mathf.Sin(2f * Mathf.PI * f0 * t) * 0.7f +
+                               Mathf.Sin(2f * Mathf.PI * (f0 * 2f) * t) * 0.2f +
+                               Mathf.Sin(2f * Mathf.PI * (f0 * 3f) * t) * 0.1f) * env * 0.55f;
+        }
+        procVoiceGamma = AudioClip.Create("ProcVoiceGamma", gammaLen, 1, sampleRate, false);
+        procVoiceGamma.SetData(gammaSamples, 0);
+
+        // Spatial Police Siren (600 Hz <-> 920 Hz sine sweep over 0.65s)
+        int sirenLen = Mathf.RoundToInt(sampleRate * 0.65f);
+        float[] sirenSamples = new float[sirenLen];
+        float sirenPhase = 0f;
+        for (int i = 0; i < sirenLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            float sweep = 0.5f + 0.5f * Mathf.Sin(2f * Mathf.PI * (1f / 0.65f) * t);
+            float freq = Mathf.Lerp(600f, 920f, sweep);
+            sirenPhase += 2f * Mathf.PI * freq / sampleRate;
+            float env = Mathf.Sin(Mathf.PI * (float)i / sirenLen);
+            sirenSamples[i] = Mathf.Sin(sirenPhase) * env * 0.5f;
+        }
+        procSirenClip = AudioClip.Create("ProcSiren", sirenLen, 1, sampleRate, false);
+        procSirenClip.SetData(sirenSamples, 0);
+
+        // Looping VIP Helicopter Rotor Hum (22 Hz fundamental rotor pulse + 66 Hz drone)
+        int chopperLen = sampleRate; // 1 full second seamless loop
+        float[] chopperSamples = new float[chopperLen];
+        for (int i = 0; i < chopperLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            chopperSamples[i] = (Mathf.Sin(2f * Mathf.PI * 22f * t) * 0.55f +
+                                 Mathf.Sin(2f * Mathf.PI * 44f * t) * 0.30f +
+                                 Mathf.Sin(2f * Mathf.PI * 66f * t) * 0.15f) * 0.3f;
+        }
+        procChopperHumClip = AudioClip.Create("ProcChopperHum", chopperLen, 1, sampleRate, false);
+        procChopperHumClip.SetData(chopperSamples, 0);
+
+        // 3D Laser Cage Shatter Clip (resonant glass-like ping + noise burst)
+        int shatterLen = sampleRate * 35 / 100;
+        float[] shatterSamples = new float[shatterLen];
+        for (int i = 0; i < shatterLen; i++)
+        {
+            float t = (float)i / sampleRate;
+            float decay = Mathf.Exp(-t * 14f);
+            float ping = Mathf.Sin(2f * Mathf.PI * 2400f * t) * 0.4f + Mathf.Sin(2f * Mathf.PI * 1800f * t) * 0.25f;
+            shatterSamples[i] = (Random.Range(-1f, 1f) * 0.45f + ping) * decay * 0.5f;
+        }
+        procGlassShatterClip = AudioClip.Create("ProcGlassShatter", shatterLen, 1, sampleRate, false);
+        procGlassShatterClip.SetData(shatterSamples, 0);
     }
 
     void PlaySFX(AudioClip customClip, AudioClip fallbackClip, float pitch = 1f)
@@ -3578,7 +3767,8 @@ public class TycoonBoardManager : MonoBehaviour
             if (isDoubles)
             {
                 inJail[0] = false;
-                RefreshDashboard($"ROLLED DOUBLES [{d1}+{d2}]!", "Released from Jail!");
+                ShatterJailCage(0);
+                RefreshDashboard($"ROLLED DOUBLES [{d1}+{d2}]!", "Laser Cage shattered! Released from Jail!");
                 yield return new WaitForSeconds(0.8f);
             }
             else
@@ -3586,7 +3776,8 @@ public class TycoonBoardManager : MonoBehaviour
                 playerCash[0] -= 50;
                 freeParkingJackpot += 50;
                 inJail[0] = false;
-                RefreshDashboard($"PAID $50 BAIL [{d1}+{d2}]", "Bail added to Free Parking Jackpot!");
+                ShatterJailCage(0);
+                RefreshDashboard($"PAID $50 BAIL [{d1}+{d2}]", "Laser Cage shattered! Bail added to Free Parking Jackpot!");
                 yield return new WaitForSeconds(0.8f);
             }
         }
@@ -4132,11 +4323,174 @@ public class TycoonBoardManager : MonoBehaviour
         return true;
     }
 
+    GameObject SpawnJailLaserCage(int playerIdx)
+    {
+        if (playerIdx < 0 || playerIdx >= 4) return null;
+        if (jailCageHolders[playerIdx] != null)
+        {
+            Destroy(jailCageHolders[playerIdx]);
+            jailCageHolders[playerIdx] = null;
+        }
+
+        if (board[10] == null || board[10].tileTransform == null) return null;
+
+        Vector3 laneOffset;
+        switch (playerIdx)
+        {
+            case 0: laneOffset = new Vector3(-0.015f, 0.018f, -0.012f); break;
+            case 1: laneOffset = new Vector3( 0.015f, 0.018f, -0.012f); break;
+            case 2: laneOffset = new Vector3(-0.015f, 0.018f,  0.012f); break;
+            case 3: laneOffset = new Vector3( 0.015f, 0.018f,  0.012f); break;
+            default: laneOffset = Vector3.up * 0.018f; break;
+        }
+
+        Vector3 cageCenter = board[10].tileTransform.localPosition + laneOffset;
+
+        GameObject cageHolder = new GameObject($"Laser_Jail_Cage_P{playerIdx}");
+        cageHolder.transform.SetParent(transform, false);
+        cageHolder.transform.localPosition = cageCenter;
+        cageHolder.transform.localRotation = Quaternion.identity;
+
+        Color laserColor = new Color(1.0f, 0.24f, 0.06f); // Glowing crimson-orange
+        Material laserMat = CreateColoredMaterial(laserColor, 0.95f, 0.1f);
+        if (laserMat.HasProperty("_EmissionColor"))
+        {
+            laserMat.EnableKeyword("_EMISSION");
+            laserMat.SetColor("_EmissionColor", laserColor * 2.5f);
+        }
+
+        float dx = 0.013f;
+        float dz = 0.015f;
+        Vector3[] barCorners = new Vector3[]
+        {
+            new Vector3(-dx, 0.028f, -dz),
+            new Vector3( dx, 0.028f, -dz),
+            new Vector3(-dx, 0.028f,  dz),
+            new Vector3( dx, 0.028f,  dz)
+        };
+
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject bar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            bar.name = $"Laser_Bar_{i}";
+            bar.transform.SetParent(cageHolder.transform, false);
+            bar.transform.localPosition = barCorners[i];
+            bar.transform.localScale = new Vector3(0.004f, 0.028f, 0.004f);
+            Destroy(bar.GetComponent<Collider>());
+            bar.GetComponent<Renderer>().material = laserMat;
+        }
+
+        // Glowing top energy cap ring
+        GameObject topCap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        topCap.name = "Laser_Energy_Cap";
+        topCap.transform.SetParent(cageHolder.transform, false);
+        topCap.transform.localPosition = new Vector3(0f, 0.056f, 0f);
+        topCap.transform.localScale = new Vector3(0.034f, 0.002f, 0.038f);
+        Destroy(topCap.GetComponent<Collider>());
+        topCap.GetComponent<Renderer>().material = laserMat;
+
+        jailCageHolders[playerIdx] = cageHolder;
+        return cageHolder;
+    }
+
+    IEnumerator DropJailCageCoroutine(GameObject cage)
+    {
+        if (cage == null) yield break;
+        Vector3 finalPos = cage.transform.localPosition;
+        Vector3 startPos = finalPos + new Vector3(0f, 0.12f, 0f);
+        cage.transform.localPosition = startPos;
+
+        float duration = 0.25f;
+        float elapsed = 0f;
+        while (elapsed < duration && cage != null)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float easeT = t * t;
+            cage.transform.localPosition = Vector3.Lerp(startPos, finalPos, easeT);
+            yield return null;
+        }
+
+        if (cage != null)
+        {
+            cage.transform.localPosition = finalPos;
+            PlaySFX(tokenMoveSound, procStepClip, 0.65f);
+            PlayHaptic(0.4f, 0.15f);
+        }
+    }
+
+    void ShatterJailCage(int playerIdx)
+    {
+        if (playerIdx < 0 || playerIdx >= 4) return;
+        if (jailCageHolders[playerIdx] == null) return;
+        StartCoroutine(ShatterJailCageCoroutine(playerIdx));
+    }
+
+    IEnumerator ShatterJailCageCoroutine(int playerIdx)
+    {
+        GameObject cage = jailCageHolders[playerIdx];
+        jailCageHolders[playerIdx] = null;
+        if (cage == null) yield break;
+
+        PlaySFX(procGlassShatterClip, procDiceClip, 1.15f);
+        if (playerIdx == 0) PlayHaptic(0.6f, 0.22f);
+
+        Transform[] pieces = cage.GetComponentsInChildren<Transform>();
+        List<Transform> shatterBars = new List<Transform>();
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            if (pieces[i] != null && pieces[i] != cage.transform)
+            {
+                shatterBars.Add(pieces[i]);
+            }
+        }
+
+        Vector3[] burstDirs = new Vector3[shatterBars.Count];
+        for (int i = 0; i < shatterBars.Count; i++)
+        {
+            Vector3 local = shatterBars[i].localPosition;
+            Vector3 horiz = new Vector3(local.x, 0f, local.z).normalized;
+            if (horiz.sqrMagnitude < 0.001f) horiz = Random.insideUnitSphere;
+            burstDirs[i] = (horiz + Vector3.up * 1.6f).normalized;
+        }
+
+        float elapsed = 0f;
+        float duration = 0.35f;
+        while (elapsed < duration && cage != null)
+        {
+            elapsed += Time.deltaTime;
+            float dt = Time.deltaTime;
+            for (int i = 0; i < shatterBars.Count; i++)
+            {
+                if (shatterBars[i] != null)
+                {
+                    shatterBars[i].localPosition += burstDirs[i] * (0.16f * dt);
+                    shatterBars[i].Rotate(new Vector3(400f, 300f, 500f) * dt);
+                    shatterBars[i].localScale = Vector3.Max(Vector3.zero, shatterBars[i].localScale - Vector3.one * (0.014f * dt));
+                }
+            }
+            yield return null;
+        }
+
+        if (cage != null) Destroy(cage);
+    }
+
     void SendToJail(int playerIdx)
     {
         playerPos[playerIdx] = 10;
         inJail[playerIdx] = true;
         PositionTokenOnTile(playerIdx, 10);
+
+        if (procSirenClip != null)
+        {
+            PlaySFX(procSirenClip, procSirenClip, 1.0f);
+        }
+
+        GameObject cage = SpawnJailLaserCage(playerIdx);
+        if (cage != null)
+        {
+            StartCoroutine(DropJailCageCoroutine(cage));
+        }
     }
 
     void EliminatePlayerForBankruptcy(int p)
@@ -4249,6 +4603,7 @@ public class TycoonBoardManager : MonoBehaviour
                 inJail[aiIdx] = false;
                 playerCash[aiIdx] -= 50;
                 freeParkingJackpot += 50;
+                ShatterJailCage(aiIdx);
             }
 
             RefreshDashboard($"{GetPlayerName(aiIdx).ToUpper()} ROLLED [{aiD1}+{aiD2}={lastDiceTotal}]", $"{GetPlayerName(aiIdx)} is advancing {lastDiceTotal} steps clockwise...");
@@ -4285,7 +4640,14 @@ public class TycoonBoardManager : MonoBehaviour
         SaveGameState();
 
         currentState = TurnState.WaitingForRoll;
-        RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
+        if (inJail[0])
+        {
+            RefreshDashboard("IN JAIL!", "IN JAIL! POKE [BUY DEED] TO PAY $50 BAIL NOW, OR THROW DICE FOR DOUBLES!");
+        }
+        else
+        {
+            RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
+        }
     }
 
     void ShiftMarketCycle()
@@ -4582,6 +4944,7 @@ public class TycoonBoardManager : MonoBehaviour
             PlayerPrefs.SetInt($"Tycoon_Cash_P{p}", playerCash[p]);
             PlayerPrefs.SetInt($"Tycoon_Pos_P{p}", playerPos[p]);
             PlayerPrefs.SetInt($"Tycoon_Bankrupt_P{p}", isBankrupt[p] ? 1 : 0);
+            PlayerPrefs.SetInt($"Tycoon_InJail_P{p}", inJail[p] ? 1 : 0);
         }
 
         PlayerPrefs.SetInt("Tycoon_Jackpot", freeParkingJackpot);
@@ -4614,7 +4977,12 @@ public class TycoonBoardManager : MonoBehaviour
             playerCash[p] = PlayerPrefs.GetInt($"Tycoon_Cash_P{p}", startingCashConfig);
             playerPos[p] = PlayerPrefs.GetInt($"Tycoon_Pos_P{p}", 0);
             isBankrupt[p] = (PlayerPrefs.GetInt($"Tycoon_Bankrupt_P{p}", 0) == 1);
+            inJail[p] = (PlayerPrefs.GetInt($"Tycoon_InJail_P{p}", 0) == 1);
             PositionTokenOnTile(p, playerPos[p]);
+            if (inJail[p])
+            {
+                SpawnJailLaserCage(p);
+            }
         }
 
         UpdateActivePlayerVisibilities();
@@ -4652,7 +5020,14 @@ public class TycoonBoardManager : MonoBehaviour
 
         RebuildMonopolySynergyBeams();
         UpdateLiveHUDStats();
-        RefreshDashboard("SAVED EMPIRE LOADED", "Restored your metropolis, net worth, and active market cycle!");
+        if (inJail[0])
+        {
+            RefreshDashboard("IN JAIL!", "IN JAIL! POKE [BUY DEED] TO PAY $50 BAIL NOW, OR THROW DICE FOR DOUBLES!");
+        }
+        else
+        {
+            RefreshDashboard("SAVED EMPIRE LOADED", "Restored your metropolis, net worth, and active market cycle!");
+        }
     }
 
     public void ResetMatch()
@@ -4666,6 +5041,11 @@ public class TycoonBoardManager : MonoBehaviour
             playerPos[p] = 0;
             isBankrupt[p] = false;
             inJail[p] = false;
+            if (jailCageHolders[p] != null)
+            {
+                Destroy(jailCageHolders[p]);
+                jailCageHolders[p] = null;
+            }
             PositionTokenOnTile(p, 0);
         }
 
