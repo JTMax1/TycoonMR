@@ -13,6 +13,9 @@ public class TycoonTactileInteractions : MonoBehaviour
     private Vector3 lastCuppedMidpoint;
     private Vector3 smoothedCuppedVelocity;
     private float lastRattleSFXTime = 0f;
+    private Vector3 die1SpinAxis = new Vector3(1f, 0.6f, 0.3f).normalized;
+    private Vector3 die2SpinAxis = new Vector3(-0.4f, 1f, -0.5f).normalized;
+    private float currentDiceSpinSpeed = 0f;
 
     // --- 2. TWO-HANDED GRABBABLE TRADE CONTRACT STATE ---
     private GameObject activeContractScroll;
@@ -104,22 +107,28 @@ public class TycoonTactileInteractions : MonoBehaviour
             lastCuppedMidpoint = currentMidpoint;
 
             Vector3 handRight = (rightPos - leftPos).normalized;
-            Vector3 jitter1 = UnityEngine.Random.insideUnitSphere * 0.004f;
-            Vector3 jitter2 = UnityEngine.Random.insideUnitSphere * 0.004f;
+            float rollAngle = Time.time * 7f;
+            Vector3 smoothOrbit = new Vector3(Mathf.Sin(rollAngle), Mathf.Cos(rollAngle) * 0.5f, 0f) * 0.005f;
 
             if (boardManager.Die1Transform != null)
-                boardManager.Die1Transform.position = currentMidpoint - handRight * 0.022f + jitter1;
+                boardManager.Die1Transform.position = currentMidpoint - handRight * 0.022f + smoothOrbit;
             if (boardManager.Die2Transform != null)
-                boardManager.Die2Transform.position = currentMidpoint + handRight * 0.022f + jitter2;
+                boardManager.Die2Transform.position = currentMidpoint + handRight * 0.022f - smoothOrbit;
 
             float shakeSpeed = smoothedCuppedVelocity.magnitude;
-            if (shakeSpeed > 0.25f)
+            if (shakeSpeed > 0.18f)
             {
-                // Tumble dice inside palms
+                // Smooth continuous tumbling with evolving 3D rotation axes
+                float targetSpinSpeed = Mathf.Clamp(shakeSpeed * 1200f, 360f, 1440f);
+                currentDiceSpinSpeed = Mathf.Lerp(currentDiceSpinSpeed, targetSpinSpeed, Time.deltaTime * 12f);
+
+                die1SpinAxis = Vector3.Slerp(die1SpinAxis, new Vector3(Mathf.Sin(Time.time * 3.5f), Mathf.Cos(Time.time * 2.8f), Mathf.Sin(Time.time * 4.2f)).normalized, Time.deltaTime * 2.5f);
+                die2SpinAxis = Vector3.Slerp(die2SpinAxis, new Vector3(Mathf.Cos(Time.time * 4.2f), Mathf.Sin(Time.time * 3.1f), Mathf.Cos(Time.time * 2.6f)).normalized, Time.deltaTime * 2.5f);
+
                 if (boardManager.Die1Transform != null)
-                    boardManager.Die1Transform.Rotate(UnityEngine.Random.onUnitSphere * 540f * Time.deltaTime);
+                    boardManager.Die1Transform.Rotate(die1SpinAxis, currentDiceSpinSpeed * Time.deltaTime, Space.Self);
                 if (boardManager.Die2Transform != null)
-                    boardManager.Die2Transform.Rotate(UnityEngine.Random.onUnitSphere * 540f * Time.deltaTime);
+                    boardManager.Die2Transform.Rotate(die2SpinAxis, currentDiceSpinSpeed * 1.15f * Time.deltaTime, Space.Self);
 
                 // Rapid spatial clicks and haptics
                 if (Time.time - lastRattleSFXTime > 0.09f)
@@ -127,6 +136,15 @@ public class TycoonTactileInteractions : MonoBehaviour
                     lastRattleSFXTime = Time.time;
                     boardManager.PlayDiceRattleSound();
                     boardManager.PlayHaptic(0.35f, 0.06f);
+                }
+            }
+            else
+            {
+                currentDiceSpinSpeed = Mathf.Lerp(currentDiceSpinSpeed, 0f, Time.deltaTime * 8f);
+                if (currentDiceSpinSpeed > 5f)
+                {
+                    if (boardManager.Die1Transform != null) boardManager.Die1Transform.Rotate(die1SpinAxis, currentDiceSpinSpeed * Time.deltaTime, Space.Self);
+                    if (boardManager.Die2Transform != null) boardManager.Die2Transform.Rotate(die2SpinAxis, currentDiceSpinSpeed * 1.15f * Time.deltaTime, Space.Self);
                 }
             }
 

@@ -64,6 +64,7 @@ public class TycoonBoardManager : MonoBehaviour
     public float currentBoardScale = 0.85f;
 
     [Header("7. Landmark, Road & Prop Prefab Holders (Drag & Drop - Auto-Filled in Editor)")]
+    public bool showCornerLandmarks = true;
     [Tooltip("Landmark placed beside Tile 0 (GO) - e.g. Market")]
     public GameObject goCornerLandmarkPrefab;
     [Tooltip("Landmark placed beside Tile 10 (Jail) - e.g. Police_Station")]
@@ -139,6 +140,10 @@ public class TycoonBoardManager : MonoBehaviour
     public int PlayerCash => playerCash != null && playerCash.Length > 0 ? playerCash[0] : 0;
     private TycoonTactileInteractions tactileInteractions;
     public TycoonTactileInteractions TactileInteractions => tactileInteractions;
+    private TycoonMinigameOrchestrator minigameOrchestrator;
+    public TycoonMinigameOrchestrator MinigameOrchestrator => minigameOrchestrator;
+    private GameObject jailLockpickButton;
+    private bool isLockpickingInProgress = false;
 
     public enum MarketCycle { Standard, BullBoom, BearRecession, TechIPOSurge }
     private MarketCycle currentMarketCycle = MarketCycle.Standard;
@@ -393,6 +398,12 @@ public class TycoonBoardManager : MonoBehaviour
         if (tactileInteractions == null)
         {
             tactileInteractions = gameObject.AddComponent<TycoonTactileInteractions>();
+        }
+
+        minigameOrchestrator = GetComponent<TycoonMinigameOrchestrator>();
+        if (minigameOrchestrator == null)
+        {
+            minigameOrchestrator = gameObject.AddComponent<TycoonMinigameOrchestrator>();
         }
 
         CacheMetaInteractionSDKHands();
@@ -1086,11 +1097,29 @@ public class TycoonBoardManager : MonoBehaviour
                 int pokedTile = CheckPhysicalTilePoke();
                 if (pokedTile != -1)
                 {
-                    selectedTileIndex = pokedTile;
-                    ShowDeedCardForTile(board[selectedTileIndex]);
-                    PlaySFX(tokenMoveSound, procStepClip, 1.4f);
-                    StartCoroutine(AnimateButtonPress(board[selectedTileIndex].tileTransform));
+                    if (inJail[0] && pokedTile == 10)
+                    {
+                        TriggerJailLockpickMinigame();
+                    }
+                    else
+                    {
+                        selectedTileIndex = pokedTile;
+                        ShowDeedCardForTile(board[selectedTileIndex]);
+                        PlaySFX(tokenMoveSound, procStepClip, 1.4f);
+                        StartCoroutine(AnimateButtonPress(board[selectedTileIndex].tileTransform));
+                    }
                 }
+            }
+        }
+
+        if (inJail[0] && jailLockpickButton != null && jailLockpickButton.activeInHierarchy && !isLockpickingInProgress)
+        {
+            Vector3 btnPos = jailLockpickButton.transform.position;
+            float distLeft = Vector3.Distance(leftHandWorldPos, btnPos);
+            float distRight = Vector3.Distance(rightHandWorldPos, btnPos);
+            if (distLeft < 0.075f || distRight < 0.075f || (Keyboard.current != null && Keyboard.current.lKey.wasPressedThisFrame))
+            {
+                TriggerJailLockpickMinigame();
             }
         }
 
@@ -1106,6 +1135,7 @@ public class TycoonBoardManager : MonoBehaviour
                 playerCash[0] -= 50;
                 freeParkingJackpot += 50;
                 inJail[0] = false;
+                HideJailLockpickButton();
                 ShatterJailCage(0);
                 PlaySFX(cashRegisterSound, procCashClip, 1.2f);
                 PlayHaptic(0.5f, 0.2f);
@@ -3006,12 +3036,12 @@ public class TycoonBoardManager : MonoBehaviour
     {
         switch (faceValue)
         {
-            case 1: return Quaternion.Euler(0f, 0f, 0f);
-            case 2: return Quaternion.Euler(-90f, 0f, 0f);
+            case 1: return Quaternion.Euler(-90f, 0f, 0f);
+            case 2: return Quaternion.Euler(0f, 0f, 0f);
             case 3: return Quaternion.Euler(0f, 0f, 90f);
             case 4: return Quaternion.Euler(0f, 0f, -90f);
-            case 5: return Quaternion.Euler(90f, 0f, 0f);
-            default: return Quaternion.Euler(180f, 0f, 0f);
+            case 5: return Quaternion.Euler(180f, 0f, 0f);
+            default: return Quaternion.Euler(90f, 0f, 0f); // 6
         }
     }
 
@@ -3044,32 +3074,38 @@ public class TycoonBoardManager : MonoBehaviour
             float o = 0.505f;
             float s = 0.25f;
 
-            AddPip(dieRoot.transform, pipMat, new Vector3(0, o, 0));
+            // Face 1 (+Z)
+            AddPip(dieRoot.transform, pipMat, new Vector3(0, 0, o));
 
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, -s));
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, 0));
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, s));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, -s));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, 0));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, s));
+            // Face 2 (+Y)
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, o, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, o, -s));
 
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, o));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, o));
-
-            AddPip(dieRoot.transform, pipMat, new Vector3(0, 0, -o));
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -s, -o));
-            AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, -o));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, -o));
-            AddPip(dieRoot.transform, pipMat, new Vector3(s, s, -o));
-
+            // Face 3 (+X)
             AddPip(dieRoot.transform, pipMat, new Vector3(o, 0, 0));
             AddPip(dieRoot.transform, pipMat, new Vector3(o, s, s));
             AddPip(dieRoot.transform, pipMat, new Vector3(o, -s, -s));
 
+            // Face 4 (-X)
             AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, -s));
             AddPip(dieRoot.transform, pipMat, new Vector3(-o, -s, s));
             AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, -s));
             AddPip(dieRoot.transform, pipMat, new Vector3(-o, s, s));
+
+            // Face 5 (-Y)
+            AddPip(dieRoot.transform, pipMat, new Vector3(0, -o, 0));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -o, s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, -s));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -o, s));
+
+            // Face 6 (-Z)
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, -s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, 0, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(-s, s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, -s, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, 0, -o));
+            AddPip(dieRoot.transform, pipMat, new Vector3(s, s, -o));
         }
 
         physDieComp = dieRoot.AddComponent<PhysicalThrowDie>();
@@ -3106,7 +3142,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         GameObject dashHolder = new GameObject("Executive_Holo_Dashboard");
         dashHolder.transform.SetParent(transform, false);
-        dashHolder.transform.localPosition = new Vector3(0f, 0.48f, 0.22f);
+        dashHolder.transform.localPosition = new Vector3(0f, 0.58f, 0.20f);
         dashHolder.transform.localRotation = Quaternion.Euler(18f, 0f, 0f);
 
         GameObject bgBoard = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -3795,20 +3831,54 @@ public class TycoonBoardManager : MonoBehaviour
 
     void SpawnCornerLandmark(int cornerTileIdx, GameObject prefab, string landmarkName)
     {
-        if (prefab == null || board[cornerTileIdx] == null || board[cornerTileIdx].tileTransform == null) return;
+        if (!showCornerLandmarks || prefab == null) return;
         GameObject holder = new GameObject(landmarkName);
         holder.transform.SetParent(transform, false);
 
-        Vector3 tilePos = board[cornerTileIdx].tileTransform.localPosition;
-        Vector3 inwardDir = -new Vector3(tilePos.x, 0f, tilePos.z).normalized;
-        holder.transform.localPosition = tilePos + inwardDir * 0.088f + new Vector3(0f, 0.012f, 0f);
-        holder.transform.localRotation = Quaternion.LookRotation(-inwardDir, Vector3.up);
+        Vector3 localPos;
+        Quaternion localRot;
+
+        switch (cornerTileIdx)
+        {
+            case 0: // GO - South-East
+                localPos = new Vector3(0.20f, 0.028f, -0.20f);
+                localRot = Quaternion.Euler(0f, -90f, 0f);
+                break;
+            case 10: // Jail - South-West
+                localPos = new Vector3(-0.20f, 0.028f, -0.20f);
+                localRot = Quaternion.Euler(0f, 0f, 0f);
+                break;
+            case 20: // Free Parking - North-West
+                localPos = new Vector3(-0.20f, 0.028f, 0.20f);
+                localRot = Quaternion.Euler(0f, 90f, 0f);
+                break;
+            case 30: // Go To Jail - North-East
+                localPos = new Vector3(0.20f, 0.028f, 0.20f);
+                localRot = Quaternion.Euler(0f, 180f, 0f);
+                break;
+            default:
+                localPos = Vector3.zero;
+                localRot = Quaternion.identity;
+                break;
+        }
+
+        holder.transform.localPosition = localPos;
+        holder.transform.localRotation = localRot;
 
         GameObject instance = Instantiate(prefab, holder.transform);
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
         StripRoguePhysicsFromImportedPrefab(instance);
-        NormalizePrefabSize(instance, 0.075f);
+        NormalizePrefabSize(instance, 0.065f);
+
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0)
+        {
+            Bounds b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+            float bottomOffsetWorld = holder.transform.position.y - b.min.y;
+            instance.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
+        }
     }
 
     Color GetOfficialColor(BoardTile tile)
@@ -4160,13 +4230,33 @@ public class TycoonBoardManager : MonoBehaviour
                 break;
 
             case TileType.Tax:
-                playerCash[playerIdx] -= tile.price;
-                freeParkingJackpot += tile.price;
+                int taxDue = tile.price;
+                if (playerIdx == 0 && minigameOrchestrator != null)
+                {
+                    RefreshDashboard($"ASSESSING {tile.name}...", "Turn the 3 steam valves to claim tax relief deductions!");
+                    bool taxDone = false;
+                    int discountWon = 0;
+                    minigameOrchestrator.RunPipeRepairMinigame((discount) =>
+                    {
+                        discountWon = discount;
+                        taxDone = true;
+                    });
+                    while (!taxDone) yield return null;
+                    taxDue = Mathf.Max(10, tile.price - discountWon);
+                    playerCash[0] -= taxDue;
+                    freeParkingJackpot += taxDue;
+                    RefreshDashboard($"TAX AUDIT REDUCED TO ${taxDue}!", $"Quick handiwork saved you ${discountWon}! Paid ${taxDue} to Jackpot.");
+                }
+                else
+                {
+                    playerCash[playerIdx] -= taxDue;
+                    freeParkingJackpot += taxDue;
+                    RefreshDashboard($"{who} PAID {tile.name}", $"${tile.price} added to Free Parking Jackpot (Now ${freeParkingJackpot})!");
+                }
                 if (jackpotGoldPile != null)
                 {
-                    StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, jackpotGoldPile.position, 6));
+                    StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, jackpotGoldPile.position, Mathf.Max(2, taxDue / 20)));
                 }
-                RefreshDashboard($"{who} PAID {tile.name}", $"${tile.price} added to Free Parking Jackpot (Now ${freeParkingJackpot})!");
                 yield return new WaitForSeconds(1.1f);
                 break;
 
@@ -4242,12 +4332,33 @@ public class TycoonBoardManager : MonoBehaviour
                 break;
 
             case 1:
-                playerCash[playerIdx] += 150;
-                PlaySFX(cashRegisterSound, procCashClip, 1.1f);
-                if (jackpotGoldPile != null)
-                    StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[playerIdx].position, 7));
-                ShowSpecialEventCard(deckName, "BUILDING & LOAN MATURES!\nCollect $150 from the Bank.", deckColor);
-                RefreshDashboard($"{who} COLLECTED $150 DIVIDEND!", "Building & Loan matured (+$150).");
+                if (playerIdx == 0 && minigameOrchestrator != null)
+                {
+                    ShowSpecialEventCard(deckName, "BANK ERROR IN YOUR FAVOR!\nVault Cash Swat Minigame!\nSwat floating dollar bills!", deckColor);
+                    RefreshDashboard("BANK ERROR IN YOUR FAVOR!", "Swat fluttering dollar bills in front of you!");
+                    bool minigameDone = false;
+                    int wonCash = 100;
+                    minigameOrchestrator.RunVaultCashSwatMinigame((totalBonus) =>
+                    {
+                        wonCash = totalBonus;
+                        minigameDone = true;
+                    });
+                    while (!minigameDone) yield return null;
+                    playerCash[0] += wonCash;
+                    PlaySFX(cashRegisterSound, procCashClip, 1.15f);
+                    if (jackpotGoldPile != null)
+                        StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[0].position, Mathf.Min(12, wonCash / 25)));
+                    RefreshDashboard($"VAULT CASH COLLECTED: +${wonCash}!", $"Bank Error payout credited to your account.");
+                }
+                else
+                {
+                    playerCash[playerIdx] += 150;
+                    PlaySFX(cashRegisterSound, procCashClip, 1.1f);
+                    if (jackpotGoldPile != null)
+                        StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[playerIdx].position, 7));
+                    ShowSpecialEventCard(deckName, "BUILDING & LOAN MATURES!\nCollect $150 from the Bank.", deckColor);
+                    RefreshDashboard($"{who} COLLECTED $150 DIVIDEND!", "Building & Loan matured (+$150).");
+                }
                 break;
 
             case 2:
@@ -4267,12 +4378,35 @@ public class TycoonBoardManager : MonoBehaviour
                 break;
 
             case 3:
-                playerCash[playerIdx] -= 100;
-                freeParkingJackpot += 100;
-                if (jackpotGoldPile != null)
-                    StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, jackpotGoldPile.position, 6));
-                ShowSpecialEventCard(deckName, "CITY STREET REPAIRS!\nPay $100 into the Free Parking Jackpot.", deckColor);
-                RefreshDashboard($"{who} PAID $100 STREET REPAIRS", $"Added $100 to Free Parking Jackpot (${freeParkingJackpot}).");
+                int repairBill = 100;
+                if (playerIdx == 0 && minigameOrchestrator != null)
+                {
+                    ShowSpecialEventCard(deckName, "CITY STREET REPAIRS!\nBurst Steam Pipe detected!\nShut off the 3 red pressure valves!", deckColor);
+                    RefreshDashboard("CITY STREET REPAIRS!", "Physically turn the 3 pressure valves to reduce your repair bill!");
+                    bool minigameDone = false;
+                    int discountWon = 0;
+                    minigameOrchestrator.RunPipeRepairMinigame((discount) =>
+                    {
+                        discountWon = discount;
+                        minigameDone = true;
+                    });
+                    while (!minigameDone) yield return null;
+                    repairBill = Mathf.Max(10, 100 - discountWon);
+                    playerCash[0] -= repairBill;
+                    freeParkingJackpot += repairBill;
+                    if (jackpotGoldPile != null)
+                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, jackpotGoldPile.position, Mathf.Max(2, repairBill / 20)));
+                    RefreshDashboard($"REPAIRS COMPLETE: PAID ${repairBill}!", $"Quick handiwork saved you ${discountWon}! Paid ${repairBill} into Jackpot.");
+                }
+                else
+                {
+                    playerCash[playerIdx] -= repairBill;
+                    freeParkingJackpot += repairBill;
+                    if (jackpotGoldPile != null)
+                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, jackpotGoldPile.position, 6));
+                    ShowSpecialEventCard(deckName, "CITY STREET REPAIRS!\nPay $100 into the Free Parking Jackpot.", deckColor);
+                    RefreshDashboard($"{who} PAID $100 STREET REPAIRS", $"Added $100 to Free Parking Jackpot (${freeParkingJackpot}).");
+                }
                 break;
 
             default:
@@ -4658,11 +4792,78 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void ShatterJailCage(int playerIdx)
+    public void ShatterJailCage(int playerIdx)
     {
         if (playerIdx < 0 || playerIdx >= 4) return;
+        if (playerIdx == 0) HideJailLockpickButton();
         if (jailCageHolders[playerIdx] == null) return;
         StartCoroutine(ShatterJailCageCoroutine(playerIdx));
+    }
+
+    public void ShowJailLockpickButton()
+    {
+        if (jailLockpickButton == null)
+        {
+            if (board != null && board.Length > 10 && board[10] != null && board[10].tileTransform != null)
+            {
+                jailLockpickButton = new GameObject("Jail_Lockpick_Button");
+                jailLockpickButton.transform.SetParent(board[10].tileTransform, false);
+                jailLockpickButton.transform.localPosition = new Vector3(0f, 0.09f, 0f);
+                jailLockpickButton.transform.localRotation = Quaternion.identity;
+
+                GameObject plate = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                plate.name = "ButtonPlate";
+                plate.transform.SetParent(jailLockpickButton.transform, false);
+                plate.transform.localScale = new Vector3(0.065f, 0.008f, 0.065f);
+                Destroy(plate.GetComponent<Collider>());
+                plate.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(1f, 0.82f, 0.15f), 0.95f, 0.1f);
+
+                GameObject textGO = new GameObject("ButtonText");
+                textGO.transform.SetParent(jailLockpickButton.transform, false);
+                textGO.transform.localPosition = new Vector3(0f, 0.006f, 0f);
+                textGO.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                textGO.transform.localScale = Vector3.one * 0.00045f;
+
+                Canvas c = textGO.AddComponent<Canvas>();
+                c.renderMode = RenderMode.WorldSpace;
+                TextMeshProUGUI tmp = textGO.AddComponent<TextMeshProUGUI>();
+                tmp.text = "<b>PICK LOCK</b>\n<size=18>(FREE)</size>";
+                tmp.fontSize = 24;
+                tmp.alignment = TextAlignmentOptions.Center;
+                tmp.color = Color.black;
+            }
+        }
+        if (jailLockpickButton != null) jailLockpickButton.SetActive(true);
+    }
+
+    public void HideJailLockpickButton()
+    {
+        if (jailLockpickButton != null) jailLockpickButton.SetActive(false);
+    }
+
+    public void TriggerJailLockpickMinigame()
+    {
+        if (isLockpickingInProgress || !inJail[0] || minigameOrchestrator == null) return;
+        isLockpickingInProgress = true;
+        HideJailLockpickButton();
+        RefreshDashboard("MECHANICAL LOCKPICK INITIATED!", "Poke 3 Tumbler Pins at the green shear line to escape!");
+        minigameOrchestrator.RunJailLockpickMinigame((escaped) =>
+        {
+            isLockpickingInProgress = false;
+            if (escaped)
+            {
+                inJail[0] = false;
+                ShatterJailCage(0);
+                PlaySFX(cashRegisterSound, procCashClip, 1.3f);
+                RefreshDashboard("LOCKPICK SUCCESSFUL! ESCAPED!", "You cracked the mechanical padlock and shattered the Laser Cage! Free to roll!");
+            }
+            else
+            {
+                RefreshDashboard("LOCKPICK FAILED!", "Timer expired before all pins locked! Pay $50 bail or roll for doubles.");
+                if (inJail[0]) ShowJailLockpickButton();
+            }
+            UpdateLiveHUDStats();
+        });
     }
 
     IEnumerator ShatterJailCageCoroutine(int playerIdx)
@@ -4729,6 +4930,11 @@ public class TycoonBoardManager : MonoBehaviour
         if (cage != null)
         {
             StartCoroutine(DropJailCageCoroutine(cage));
+        }
+
+        if (playerIdx == 0)
+        {
+            ShowJailLockpickButton();
         }
     }
 
