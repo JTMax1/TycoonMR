@@ -1226,21 +1226,27 @@ MonoBehaviour:
   dicePrefab: {fileID: 0}
   playerTokenPrefab: {fileID: 400323601965181187, guid: fc1e359a90d4e6542b4d8022c50429ce, type: 3}
   aiRivalTokenPrefab: {fileID: 100010, guid: a7b60e70606f80245b2f8bc7ce2fadb6, type: 3}
-  rivalAvatarPrefab: {fileID: 0}
+  rival2TokenPrefab: {fileID: 6797269430195769530, guid: 0f2505a3f5e77fa44a6703470cc30543, type: 3}
+  rival3TokenPrefab: {fileID: 1049787233113196042, guid: ff60e6cbfd0ed6e4bace0ea2a2f5a238, type: 3}
+  playerTokenPrefabs: []
+  rivalAvatarPrefab: {fileID: 5852302665562536657, guid: 8a189eef9ab90482cb647df9bccd7566, type: 3}
+  rival2AvatarPrefab: {fileID: 5852302665562536657, guid: 8a189eef9ab90482cb647df9bccd7566, type: 3}
+  rival3AvatarPrefab: {fileID: 0}
+  rivalAvatarPrefabs: []
   level1HousePrefab: {fileID: 7674863563708117942, guid: bc4c98111a1d3884f9fcec8d2c53a76b, type: 3}
   level2HousePrefab: {fileID: 100000, guid: 11c264ca1bac5d74d883c776435fa684, type: 3}
   level3HousePrefab: {fileID: 8856790077123654498, guid: d1010e756480b8741bb3c4e9122d952e, type: 3}
   level4HousePrefab: {fileID: 4724550707367194761, guid: 54bb0c6cea2adb2408f37dd1ba7a7dd7, type: 3}
-  level5SkyscraperPrefab: {fileID: 0}
+  level5SkyscraperPrefab: {fileID: 4508651562860150202, guid: 6d3bd000f9d3e3c479ee0339e54f1247, type: 3}
   parkTreePrefab: {fileID: 8483353424882059376, guid: d77f3988a559cee4f85af6b47c0539a7, type: 3}
   parkCenterpiecePrefab: {fileID: 3226462819479356637, guid: d2d360664b1d55c4584ee3bc8ec31be8, type: 3}
   streetlightPrefab: {fileID: 3351462997267180038, guid: ccab6c8306a6dae4d9688eb372e59639, type: 3}
-  ambientTrafficCar1Prefab: {fileID: 0}
-  ambientTrafficCar2Prefab: {fileID: 0}
-  vipHelicopterPrefab: {fileID: 0}
-  diceRollSound: {fileID: 0}
+  ambientTrafficCar1Prefab: {fileID: 787257008305991662, guid: 6fda6d14dbbf5c54fb01d830757a8d1f, type: 3}
+  ambientTrafficCar2Prefab: {fileID: 52932905164622209, guid: 640b94cf88de4ef459ce14645b2736d9, type: 3}
+  vipHelicopterPrefab: {fileID: 7150096340317390813, guid: 076c23731e9bb48f283dc2de3f55c871, type: 3}
+  diceRollSound: {fileID: 8300000, guid: 33195832f936442e58c40fb62ab7af9e, type: 3}
   tokenMoveSound: {fileID: 0}
-  cashRegisterSound: {fileID: 0}
+  cashRegisterSound: {fileID: 8300000, guid: 3f0309ebc419a4ce1a5ca9a77a3be477, type: 3}
   buildUpgradeSound: {fileID: 0}
   darkMarbleMaterial: {fileID: 2100000, guid: 584acb4897f0a452cadf1d493e088dc9, type: 2}
   brushedGoldMaterial: {fileID: 2100000, guid: 85a6d42053e594f94b92291d304e837f, type: 2}
@@ -1318,7 +1324,7 @@ AudioSource:
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0
+      value: 1
       inSlope: 0
       outSlope: 0
       tangentMode: 0
