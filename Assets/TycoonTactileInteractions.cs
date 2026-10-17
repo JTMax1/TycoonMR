@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using TMPro;
 
 [RequireComponent(typeof(TycoonBoardManager))]
@@ -193,27 +194,35 @@ public class TycoonTactileInteractions : MonoBehaviour
         onContractSigned = onAccept;
         onContractTorn = onReject;
 
-        Transform eye = Camera.main != null ? Camera.main.transform : boardManager.transform;
-        Vector3 spawnPos = eye.position + eye.forward * 0.48f - eye.up * 0.12f;
-        Quaternion spawnRot = Quaternion.LookRotation(eye.forward, Vector3.up);
+        (Vector3 spawnPos, Quaternion spawnRot) = boardManager.GetElevatedBoardFrontPose(0.36f, 0.24f);
 
         activeContractScroll = new GameObject("Executive_Contract_Scroll");
         activeContractScroll.transform.position = spawnPos;
         activeContractScroll.transform.rotation = spawnRot;
-        activeContractScroll.transform.localScale = Vector3.one * 0.95f;
+        activeContractScroll.transform.localScale = Vector3.one * 0.62f;
 
         Material parchmentMat = boardManager.CreateColoredMaterial(new Color(0.97f, 0.94f, 0.85f), 0.35f, 0.02f);
         Material goldTrimMat = boardManager.CreateColoredMaterial(new Color(0.85f, 0.68f, 0.24f), 0.85f, 0.8f);
         Material waxSealMat = boardManager.CreateColoredMaterial(new Color(0.82f, 0.15f, 0.18f), 0.65f, 0.1f);
 
+        // Optional custom Trade Contract Prefab
+        if (boardManager.tradeContractPrefab != null)
+        {
+            GameObject customContract = Instantiate(boardManager.tradeContractPrefab, activeContractScroll.transform, false);
+            boardManager.StripRoguePhysicsFromImportedPrefab(customContract);
+            boardManager.NormalizePrefabSize(customContract, 0.32f);
+            customContract.transform.localPosition = new Vector3(0f, 0f, 0.01f);
+        }
+
         // --- LEFT HALF ---
         GameObject leftHalfGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
         leftHalfGO.name = "Contract_LeftHalf";
         leftHalfGO.transform.SetParent(activeContractScroll.transform, false);
-        leftHalfGO.transform.localPosition = new Vector3(-0.115f, 0f, 0f);
+        leftHalfGO.transform.localPosition = new Vector3(-0.11f, 0f, 0f);
         leftHalfGO.transform.localScale = new Vector3(0.22f, 0.30f, 0.006f);
         Destroy(leftHalfGO.GetComponent<Collider>());
         leftHalfGO.GetComponent<Renderer>().material = parchmentMat;
+        boardManager.AttachNativeBuildingBlockGrab(leftHalfGO);
         contractLeftHalf = leftHalfGO.transform;
 
         // Left gold roller rod
@@ -228,10 +237,11 @@ public class TycoonTactileInteractions : MonoBehaviour
         GameObject rightHalfGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
         rightHalfGO.name = "Contract_RightHalf";
         rightHalfGO.transform.SetParent(activeContractScroll.transform, false);
-        rightHalfGO.transform.localPosition = new Vector3(0.115f, 0f, 0f);
+        rightHalfGO.transform.localPosition = new Vector3(0.11f, 0f, 0f);
         rightHalfGO.transform.localScale = new Vector3(0.22f, 0.30f, 0.006f);
         Destroy(rightHalfGO.GetComponent<Collider>());
         rightHalfGO.GetComponent<Renderer>().material = parchmentMat;
+        boardManager.AttachNativeBuildingBlockGrab(rightHalfGO);
         contractRightHalf = rightHalfGO.transform;
 
         // Right gold roller rod
@@ -243,15 +253,27 @@ public class TycoonTactileInteractions : MonoBehaviour
         rightRod.GetComponent<Renderer>().material = goldTrimMat;
 
         // --- GOLD WAX SEAL / STAMP BUTTON (ACCEPT) ---
-        GameObject sealObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        sealObj.name = "Contract_Wax_Seal";
-        sealObj.transform.SetParent(activeContractScroll.transform, false);
-        sealObj.transform.localPosition = new Vector3(0f, -0.09f, -0.008f);
-        sealObj.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        sealObj.transform.localScale = new Vector3(0.055f, 0.006f, 0.055f);
-        Destroy(sealObj.GetComponent<Collider>());
-        sealObj.GetComponent<Renderer>().material = waxSealMat;
-        stampSealButton = sealObj.transform;
+        if (boardManager.waxSealStampPrefab != null)
+        {
+            GameObject sealObj = Instantiate(boardManager.waxSealStampPrefab, activeContractScroll.transform, false);
+            sealObj.name = "Contract_Wax_Seal";
+            boardManager.StripRoguePhysicsFromImportedPrefab(sealObj);
+            boardManager.NormalizePrefabSize(sealObj, 0.06f);
+            sealObj.transform.localPosition = new Vector3(0f, -0.09f, -0.008f);
+            stampSealButton = sealObj.transform;
+        }
+        else
+        {
+            GameObject sealObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            sealObj.name = "Contract_Wax_Seal";
+            sealObj.transform.SetParent(activeContractScroll.transform, false);
+            sealObj.transform.localPosition = new Vector3(0f, -0.09f, -0.008f);
+            sealObj.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            sealObj.transform.localScale = new Vector3(0.055f, 0.006f, 0.055f);
+            Destroy(sealObj.GetComponent<Collider>());
+            sealObj.GetComponent<Renderer>().material = waxSealMat;
+            stampSealButton = sealObj.transform;
+        }
 
         // --- CONTRACT TEXT CANVAS ---
         GameObject canvasGO = new GameObject("Contract_TMP_Canvas");
@@ -301,11 +323,14 @@ public class TycoonTactileInteractions : MonoBehaviour
         bool leftTracked = boardManager.IsLeftHandTracked && leftPos.y > -50f;
         bool rightTracked = boardManager.IsRightHandTracked && rightPos.y > -50f;
 
-        // 1. Check Stamp to Sign (Right hand tap or pinch near Wax Seal)
-        if (stampSealButton != null && rightTracked)
+        // 1. Check Stamp to Sign (Left or Right hand tap near Wax Seal, or Space bar desktop test)
+        if (stampSealButton != null)
         {
-            float distToSeal = Vector3.Distance(rightPos, stampSealButton.position);
-            if (distToSeal < 0.075f)
+            float distLeftToSeal = leftTracked ? Vector3.Distance(leftPos, stampSealButton.position) : 999f;
+            float distRightToSeal = rightTracked ? Vector3.Distance(rightPos, stampSealButton.position) : 999f;
+            bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+
+            if (distLeftToSeal < 0.085f || distRightToSeal < 0.085f || spacePressed)
             {
                 SignAndAcceptContract();
                 return;

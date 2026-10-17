@@ -78,6 +78,16 @@ public class TycoonBoardManager : MonoBehaviour
     [Tooltip("Optional Billboard prop prefab")]
     public GameObject billboardPropPrefab;
 
+    [Header("8. Interactive Props & Minigame Prefab Slots (Auto-Searched + Drag & Drop)")]
+    public GameObject tradeContractPrefab;
+    public GameObject waxSealStampPrefab;
+    public GameObject auctionGavelPrefab;
+    public GameObject cashBriefcasePrefab;
+    public GameObject bankVaultPrefab;
+    public GameObject dollarBillPrefab;
+    public GameObject padlockPrefab;
+    public GameObject steamPipeValvePrefab;
+
     public enum TileType { Go, Property, Railroad, Utility, Tax, Chance, Chest, Jail, FreeParking, GoToJail }
 
     public class BoardTile
@@ -233,6 +243,7 @@ public class TycoonBoardManager : MonoBehaviour
     private GameObject vrExitFloatingButton;
     private GameObject vrRooftopTeleportButton;
     private bool isStandingOnRooftop = false;
+    public bool IsStandingOnRooftop => isStandingOnRooftop;
 
     private AudioSource sfxSource;
     private Material masterURPMaterial;
@@ -276,19 +287,50 @@ public class TycoonBoardManager : MonoBehaviour
     private bool wasRightPinching = false;
     private bool wasLeftPinching = false;
 
-    // 1. In Awake(), keep a reference to [BuildingBlock] Cube before hiding it so we can clone its native DistanceHandGrab setup!
+    // 1. In Awake(), keep references to [BuildingBlock] templates before hiding them so we can clone their native interactions!
     private GameObject buildingBlockGrabTemplate;
+    private GameObject buildingBlockPokeTemplate;
+
+    public (Vector3 pos, Quaternion rot) GetElevatedBoardFrontPose(float heightAboveTable = 0.34f, float pullTowardPlayer = 0.22f)
+    {
+        Transform eye = Camera.main != null ? Camera.main.transform : transform;
+        Vector3 eyePos = eye.position;
+        Vector3 boardPos = transform.position;
+
+        Vector3 toPlayerHoriz = new Vector3(eyePos.x - boardPos.x, 0f, eyePos.z - boardPos.z);
+        if (toPlayerHoriz.sqrMagnitude < 0.001f) toPlayerHoriz = -transform.forward;
+        else toPlayerHoriz.Normalize();
+
+        float frontDist = (boardSize * 0.5f * currentBoardScale) - (pullTowardPlayer * currentBoardScale);
+        Vector3 targetHorizPos = boardPos + toPlayerHoriz * frontDist;
+
+        float targetY = Mathf.Max(boardPos.y + (heightAboveTable * currentBoardScale), eyePos.y - 0.18f);
+        Vector3 targetPos = new Vector3(targetHorizPos.x, targetY, targetHorizPos.z);
+
+        float yaw = Mathf.Atan2(toPlayerHoriz.x, toPlayerHoriz.z) * Mathf.Rad2Deg;
+        Quaternion targetRot = Quaternion.Euler(15f, yaw, 0f);
+
+        return (targetPos, targetRot);
+    }
 
     void Awake()
     {
         GameObject locomotorObj = GameObject.Find("Locomotor");
         if (locomotorObj != null) locomotorObj.SetActive(false);
 
-        GameObject sampleCube = GameObject.Find("[BuildingBlock] Cube");
-        if (sampleCube != null)
+        GameObject[] allObjects = GameObject.FindObjectsByType<GameObject>(FindObjectsInactive.Include);
+        foreach (GameObject go in allObjects)
         {
-            buildingBlockGrabTemplate = sampleCube;
-            sampleCube.SetActive(false);
+            if (go == null) continue;
+            if (go.name == "[BuildingBlock] Cube" && buildingBlockGrabTemplate == null)
+            {
+                buildingBlockGrabTemplate = go;
+                go.SetActive(false);
+            }
+            else if (go.name.Contains("PokeInteraction") && buildingBlockPokeTemplate == null)
+            {
+                buildingBlockPokeTemplate = go;
+            }
         }
 
         Rigidbody boardRb = GetComponent<Rigidbody>();
@@ -297,7 +339,7 @@ public class TycoonBoardManager : MonoBehaviour
         EnforceUnderlayPassthrough();
     }
 
-    void AttachNativeBuildingBlockGrab(GameObject targetObj, Rigidbody targetRb)
+    public void AttachNativeBuildingBlockGrab(GameObject targetObj, Rigidbody targetRb = null)
     {
         if (targetObj == null) return;
         if (targetRb == null)
@@ -369,7 +411,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void StripRoguePhysicsFromImportedPrefab(GameObject spawnedInstance)
+    public void StripRoguePhysicsFromImportedPrefab(GameObject spawnedInstance)
     {
         if (spawnedInstance == null) return;
         Rigidbody[] rbs = spawnedInstance.GetComponentsInChildren<Rigidbody>(true);
@@ -2245,14 +2287,34 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    private int vrVantageIndex = 0;
+
     void ToggleRooftopVantagePoint()
     {
         Transform eye = Camera.main != null ? Camera.main.transform : null;
         if (!isInPenthouseVR || eye == null) return;
-        isStandingOnRooftop = !isStandingOnRooftop;
+        vrVantageIndex = (vrVantageIndex + 1) % 3;
 
-        if (isStandingOnRooftop)
+        if (vrVantageIndex == 0) // 1. Central Park Street Plaza
         {
+            isStandingOnRooftop = false;
+            transform.position = new Vector3(eye.position.x, eye.position.y - 1.65f, eye.position.z);
+            PlaySFX(tokenMoveSound, procStepClip, 0.9f);
+            RefreshDashboard("CENTRAL PARK STREET PLAZA", "Standing in Central Park looking at the metropolis skyline. Left Pinch: Boardwalk Tour.");
+            UpdateVRButtonLabel(vrRooftopTeleportButton, "BOARDWALK TOUR\n(Left Pinch)");
+        }
+        else if (vrVantageIndex == 1) // 2. Boardwalk Sidewalk Tour
+        {
+            isStandingOnRooftop = false;
+            Vector3 tile39Pos = (board != null && board.Length > 39 && board[39].tileTransform != null) ? board[39].tileTransform.localPosition : new Vector3(0.38f, 0.028f, -0.38f);
+            transform.position = eye.position - (transform.rotation * (tile39Pos * 14f)) - new Vector3(0f, 1.65f, 0f);
+            PlaySFX(tokenMoveSound, procStepClip, 1.15f);
+            RefreshDashboard("BOARDWALK SIDEWALK TOUR", "1:1 street level on the Boardwalk sidewalk looking down the avenue! Left Pinch: Skyscraper Rooftop.");
+            UpdateVRButtonLabel(vrRooftopTeleportButton, "ROOFTOP VIEW\n(Left Pinch)");
+        }
+        else // 3. Penthouse Skyscraper Rooftop
+        {
+            isStandingOnRooftop = true;
             BoardTile bestTile = board[39];
             int bestLvl = -1;
             for (int i = 0; i < 40; i++)
@@ -2268,14 +2330,16 @@ public class TycoonBoardManager : MonoBehaviour
             float rooftopHeightOffset = 2.8f + Mathf.Max(1, bestTile.buildingLevel) * 0.65f;
             transform.position = eye.position - (transform.rotation * (tileLocal * 14f)) - new Vector3(0f, rooftopHeightOffset, 0f);
             PlaySFX(buildUpgradeSound, procBuildClip, 1.25f);
-            RefreshDashboard($"PENTHOUSE ROOFTOP: {bestTile.name}", "Look down over your skyline! Left Pinch for Plaza | Right Pinch to Exit.");
+            RefreshDashboard($"PENTHOUSE ROOFTOP: {bestTile.name}", "Looking down over your skyline from the highest penthouse! Left Pinch: Central Park Plaza.");
+            UpdateVRButtonLabel(vrRooftopTeleportButton, "CENTRAL PARK\n(Left Pinch)");
         }
-        else
-        {
-            transform.position = new Vector3(eye.position.x, eye.position.y - 1.65f, eye.position.z);
-            PlaySFX(tokenMoveSound, procStepClip, 0.9f);
-            RefreshDashboard("CENTRAL PARK STREET PLAZA", "Left Pinch for Rooftop Terrace | Right Pinch to Exit VR View.");
-        }
+    }
+
+    void UpdateVRButtonLabel(GameObject btn, string newText)
+    {
+        if (btn == null) return;
+        TextMeshProUGUI tmp = btn.GetComponentInChildren<TextMeshProUGUI>();
+        if (tmp != null) tmp.text = newText;
     }
 
     void BuildLivingCenterCourtyard()
@@ -3877,6 +3941,7 @@ public class TycoonBoardManager : MonoBehaviour
             Bounds b = renderers[0].bounds;
             for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
             float bottomOffsetWorld = holder.transform.position.y - b.min.y;
+            bottomOffsetWorld -= (0.005f * transform.lossyScale.y);
             instance.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
         }
     }
@@ -3968,7 +4033,7 @@ public class TycoonBoardManager : MonoBehaviour
         return holder.transform;
     }
 
-    void NormalizePrefabSize(GameObject obj, float targetMaxSize)
+    public void NormalizePrefabSize(GameObject obj, float targetMaxSize)
     {
         Renderer[] renderers = obj.GetComponentsInChildren<Renderer>();
         if (renderers.Length == 0) return;
@@ -4598,6 +4663,7 @@ public class TycoonBoardManager : MonoBehaviour
 
     IEnumerator FitAndRiseBuildingChronological(Transform holder, GameObject model, int level)
     {
+        if (holder == null || model == null) yield break;
         Renderer[] renderers = model.GetComponentsInChildren<Renderer>();
         float progressiveHeight = 0.55f + (level * 0.22f);
 
@@ -4620,6 +4686,7 @@ public class TycoonBoardManager : MonoBehaviour
                 b = renderers[0].bounds;
                 for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
                 float bottomOffsetWorld = holder.position.y - b.min.y;
+                bottomOffsetWorld -= (0.005f * transform.lossyScale.y);
                 model.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
             }
         }
@@ -4631,12 +4698,13 @@ public class TycoonBoardManager : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < duration)
         {
+            if (holder == null || model == null) yield break;
             elapsed += Time.deltaTime;
             float ease = 1f - Mathf.Pow(1f - Mathf.Clamp01(elapsed / duration), 3f);
             holder.localScale = new Vector3(targetScale.x, Mathf.Lerp(0.01f, targetScale.y, ease), targetScale.z);
             yield return null;
         }
-        holder.localScale = targetScale;
+        if (holder != null) holder.localScale = targetScale;
     }
 
     int CalculateAuthenticRent(BoardTile tile, int diceRoll)
@@ -5148,6 +5216,14 @@ public class TycoonBoardManager : MonoBehaviour
         gavelRoot.transform.SetParent(parent, false);
         gavelRoot.transform.localPosition = new Vector3(0f, 0.28f, -0.02f);
         gavelRoot.transform.localScale = Vector3.one * 0.75f;
+
+        if (auctionGavelPrefab != null)
+        {
+            GameObject gavelModel = Instantiate(auctionGavelPrefab, gavelRoot.transform, false);
+            StripRoguePhysicsFromImportedPrefab(gavelModel);
+            NormalizePrefabSize(gavelModel, 0.12f);
+            return gavelRoot;
+        }
 
         GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         head.name = "GavelHead";
@@ -5756,10 +5832,23 @@ public class TycoonBoardManager : MonoBehaviour
             parkCenterpiecePrefab = FindPrefabByNameOrFilter("Fountain_03", "Natures_Pot Bush_big");
         if (streetlightPrefab == null)
             streetlightPrefab = FindPrefabByNameOrFilter("Spotlight_01", "traffic_light_001");
-        if (ambientTrafficCar1Prefab == null)
-            ambientTrafficCar1Prefab = FindPrefabByNameOrFilter("Car_16", "Car_13");
-        if (ambientTrafficCar2Prefab == null)
-            ambientTrafficCar2Prefab = FindPrefabByNameOrFilter("Futuristic_Car_1", "Car_06");
+        // 7. Interactive Props & Minigame Prefabs (Header 8)
+        if (tradeContractPrefab == null)
+            tradeContractPrefab = FindPrefabByNameOrFilter("TradeContract", "Contract", "Document", "Scroll", "Paper");
+        if (waxSealStampPrefab == null)
+            waxSealStampPrefab = FindPrefabByNameOrFilter("WaxSeal", "Stamp", "Seal");
+        if (auctionGavelPrefab == null)
+            auctionGavelPrefab = FindPrefabByNameOrFilter("Gavel", "AuctionGavel", "Hammer", "Prop_ThrowingStick");
+        if (cashBriefcasePrefab == null)
+            cashBriefcasePrefab = FindPrefabByNameOrFilter("Briefcase", "CashBriefcase", "Suitcase", "Prop_SmallStorageBox_02");
+        if (bankVaultPrefab == null)
+            bankVaultPrefab = FindPrefabByNameOrFilter("BankVault", "Vault", "Safe", "Prop_SmallStorageBox_04");
+        if (dollarBillPrefab == null)
+            dollarBillPrefab = FindPrefabByNameOrFilter("DollarBill", "Cash", "Money", "Dollar");
+        if (padlockPrefab == null)
+            padlockPrefab = FindPrefabByNameOrFilter("Padlock", "Lock", "Key");
+        if (steamPipeValvePrefab == null)
+            steamPipeValvePrefab = FindPrefabByNameOrFilter("SteamValve", "Valve", "Pipe", "Faucet", "Prop_Faucet_06", "Props_Hydrant");
 
         UnityEditor.EditorUtility.SetDirty(this);
     }
