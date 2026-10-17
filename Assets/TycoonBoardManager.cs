@@ -329,9 +329,10 @@ public class TycoonBoardManager : MonoBehaviour
                 if (buildingBlockGrabTemplate == null) buildingBlockGrabTemplate = go;
                 go.SetActive(false);
             }
-            else if (go.name.Contains("PokeInteraction") && buildingBlockPokeTemplate == null)
+            else if ((go.name.Contains("PokeInteraction") || go.name.Contains("Poke Interaction") || go.name == "Poke Interaction"))
             {
-                buildingBlockPokeTemplate = go;
+                if (buildingBlockPokeTemplate == null) buildingBlockPokeTemplate = go;
+                go.SetActive(false);
             }
         }
 
@@ -372,6 +373,12 @@ public class TycoonBoardManager : MonoBehaviour
         {
             targetRb = targetObj.GetComponent<Rigidbody>();
             if (targetRb == null) targetRb = targetObj.AddComponent<Rigidbody>();
+        }
+
+        if (!targetObj.name.StartsWith("Die"))
+        {
+            targetRb.useGravity = false;
+            targetRb.isKinematic = true;
         }
 
         Grabbable targetGrabbable = targetObj.GetComponent<Grabbable>();
@@ -3030,11 +3037,9 @@ public class TycoonBoardManager : MonoBehaviour
         deedHeaderRenderer.material = CreateColoredMaterial(GetOfficialColor(tile), 0.85f);
         deedTitleTMP.text = tile.name;
 
-        if (grabbableDeedCrystal != null && tile.owner == -1)
+        if (grabbableDeedCrystal != null)
         {
-            grabbableDeedCrystal.SetActive(true);
-            grabbableDeedCrystal.transform.localPosition = new Vector3(0.24f, 0.24f, -0.18f);
-            grabbableDeedCrystal.GetComponent<Renderer>().material = CreateColoredMaterial(GetOfficialColor(tile), 0.95f, 0.7f);
+            grabbableDeedCrystal.SetActive(false);
         }
 
         string ownerLabel = tile.owner == -1 ? "UNOWNED" : (tile.owner == 0 ? "YOU (PLAYER 1)" : "RIVAL MOGUL");
@@ -3179,8 +3184,8 @@ public class TycoonBoardManager : MonoBehaviour
         {
             case 1: return Quaternion.Euler(-90f, 0f, 0f);
             case 2: return Quaternion.Euler(0f, 0f, 0f);
-            case 3: return Quaternion.Euler(0f, 0f, 90f);
-            case 4: return Quaternion.Euler(0f, 0f, -90f);
+            case 3: return Quaternion.Euler(0f, 0f, -90f);
+            case 4: return Quaternion.Euler(0f, 0f, 90f);
             case 5: return Quaternion.Euler(180f, 0f, 0f);
             default: return Quaternion.Euler(90f, 0f, 0f); // 6
         }
@@ -3981,20 +3986,20 @@ public class TycoonBoardManager : MonoBehaviour
 
         switch (cornerTileIdx)
         {
-            case 0: // GO - South-East
-                localPos = new Vector3(0.18f, 0.027f, -0.18f);
+            case 0: // GO - South-East (Market)
+                localPos = new Vector3(0.18f, 0.028f, -0.18f);
                 localRot = Quaternion.Euler(0f, -90f, 0f);
                 break;
-            case 10: // Jail - South-West
-                localPos = new Vector3(-0.18f, 0.027f, -0.18f);
+            case 10: // Jail - South-West (Police_Station)
+                localPos = new Vector3(-0.18f, 0.028f, -0.18f);
                 localRot = Quaternion.Euler(0f, 0f, 0f);
                 break;
             case 20: // Free Parking - North-West (Hospital)
-                localPos = new Vector3(-0.18f, 0.027f, 0.18f);
+                localPos = new Vector3(-0.18f, 0.028f, 0.18f);
                 localRot = Quaternion.Euler(0f, 90f, 0f);
                 break;
             case 30: // Go To Jail - North-East (School)
-                localPos = new Vector3(0.18f, 0.027f, 0.18f);
+                localPos = new Vector3(0.18f, 0.028f, 0.18f);
                 localRot = Quaternion.Euler(0f, 180f, 0f);
                 break;
             default:
@@ -4011,15 +4016,6 @@ public class TycoonBoardManager : MonoBehaviour
         instance.transform.localRotation = Quaternion.identity;
         StripRoguePhysicsFromImportedPrefab(instance);
         NormalizePrefabSize(instance, 0.065f);
-
-        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
-        if (renderers.Length > 0)
-        {
-            Bounds b = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
-            float bottomOffsetWorld = holder.transform.position.y - b.min.y;
-            instance.transform.position += new Vector3(0f, bottomOffsetWorld, 0f);
-        }
     }
 
     Color GetOfficialColor(BoardTile tile)

@@ -220,9 +220,13 @@ public class TycoonTactileInteractions : MonoBehaviour
         leftHalfGO.transform.SetParent(activeContractScroll.transform, false);
         leftHalfGO.transform.localPosition = new Vector3(-0.11f, 0f, 0f);
         leftHalfGO.transform.localScale = new Vector3(0.22f, 0.30f, 0.006f);
-        Destroy(leftHalfGO.GetComponent<Collider>());
         leftHalfGO.GetComponent<Renderer>().material = parchmentMat;
-        boardManager.AttachNativeBuildingBlockGrab(leftHalfGO);
+
+        Rigidbody leftRb = leftHalfGO.GetComponent<Rigidbody>();
+        if (leftRb == null) leftRb = leftHalfGO.AddComponent<Rigidbody>();
+        leftRb.useGravity = false;
+        leftRb.isKinematic = true;
+        boardManager.AttachNativeBuildingBlockGrab(leftHalfGO, leftRb);
         contractLeftHalf = leftHalfGO.transform;
 
         // Left gold roller rod
@@ -239,9 +243,13 @@ public class TycoonTactileInteractions : MonoBehaviour
         rightHalfGO.transform.SetParent(activeContractScroll.transform, false);
         rightHalfGO.transform.localPosition = new Vector3(0.11f, 0f, 0f);
         rightHalfGO.transform.localScale = new Vector3(0.22f, 0.30f, 0.006f);
-        Destroy(rightHalfGO.GetComponent<Collider>());
         rightHalfGO.GetComponent<Renderer>().material = parchmentMat;
-        boardManager.AttachNativeBuildingBlockGrab(rightHalfGO);
+
+        Rigidbody rightRb = rightHalfGO.GetComponent<Rigidbody>();
+        if (rightRb == null) rightRb = rightHalfGO.AddComponent<Rigidbody>();
+        rightRb.useGravity = false;
+        rightRb.isKinematic = true;
+        boardManager.AttachNativeBuildingBlockGrab(rightHalfGO, rightRb);
         contractRightHalf = rightHalfGO.transform;
 
         // Right gold roller rod
