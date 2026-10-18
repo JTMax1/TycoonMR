@@ -112,7 +112,7 @@ public partial class TycoonBoardManager : MonoBehaviour
     private int freeParkingJackpot = 100;
     private Transform jackpotGoldPile;
 
-    public enum TurnState { StartMenu, WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn }
+    public enum TurnState { StartMenu, WaitingForRoll, DiceTumbling, Moving, BuyOrPassDecision, AuctionInProgress, AITurn, Handover }
     private TurnState currentState = TurnState.WaitingForRoll;
     private int lastDiceTotal = 0;
     private int consecutiveDoubles = 0;
@@ -120,6 +120,25 @@ public partial class TycoonBoardManager : MonoBehaviour
     public TurnState CurrentState => currentState;
     public bool IsWaitingForRoll => currentState == TurnState.WaitingForRoll;
     public bool IsBuyOrPassDecision => currentState == TurnState.BuyOrPassDecision;
+
+    public bool IsHumanPlayer(int seatIdx)
+    {
+        if (seatIdx < 0 || seatIdx >= activePlayerCount) return false;
+        if (currentMatchMode == MatchMultiplayerMode.PassAndPlay) return true;
+        if (currentMatchMode == MatchMultiplayerMode.VsAIMoguls) return seatIdx == 0;
+        return seatIdx == 0;
+    }
+
+    public int GetRemainingActivePlayerCount()
+    {
+        int count = 0;
+        for (int i = 0; i < activePlayerCount; i++)
+        {
+            if (isBankrupt != null && !isBankrupt[i]) count++;
+        }
+        return count;
+    }
+
     public Vector3 LeftHandWorldPos => leftHandWorldPos;
     public Vector3 RightHandWorldPos => rightHandWorldPos;
     public bool IsLeftHandTracked => isLeftHandTracked;
@@ -975,7 +994,8 @@ public partial class TycoonBoardManager : MonoBehaviour
             }
         }
 
-        if (inJail[0] && jailLockpickButton != null && jailLockpickButton.activeInHierarchy && !isLockpickingInProgress)
+        int curP = CurrentTurnPlayer;
+        if (inJail[curP] && jailLockpickButton != null && jailLockpickButton.activeInHierarchy && !isLockpickingInProgress)
         {
             Vector3 btnPos = jailLockpickButton.transform.position;
             float distLeft = Vector3.Distance(leftHandWorldPos, btnPos);
@@ -993,16 +1013,16 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         if (currentState == TurnState.WaitingForRoll && !isPlayerHoldingDice)
         {
-            if (inJail[0] && (buyPressed || (Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame)))
+            if (inJail[curP] && (buyPressed || (Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame)))
             {
-                playerCash[0] -= 50;
+                playerCash[curP] -= 50;
                 freeParkingJackpot += 50;
-                inJail[0] = false;
+                inJail[curP] = false;
                 HideJailLockpickButton();
-                ShatterJailCage(0);
+                ShatterJailCage(curP);
                 PlaySFX(cashRegisterSound, procCashClip, 1.2f);
                 PlayHaptic(0.5f, 0.2f);
-                RefreshDashboard("PAID $50 BAIL!", "Laser Cage shattered! Free from Jail! Distance-Grab & Throw the dice!");
+                RefreshDashboard("PAID $50 BAIL!", $"Player {curP + 1} paid bail! Laser Cage shattered! Free from Jail! Distance-Grab & Throw the dice!");
                 UpdateLiveHUDStats();
             }
             else if (spacePressed)
@@ -1011,18 +1031,18 @@ public partial class TycoonBoardManager : MonoBehaviour
             }
             else if (upgradePressed)
             {
-                TryBuildChronologically(0);
+                TryBuildChronologically(curP);
             }
         }
         else if (currentState == TurnState.BuyOrPassDecision && !isHoldingDeedCrystal)
         {
             if (buyPressed || spacePressed)
             {
-                PurchaseCurrentTile(0);
+                PurchaseCurrentTile(curP);
             }
             else if (passPressed || leftPinchDown)
             {
-                BoardTile curTile = board[playerPos[0]];
+                BoardTile curTile = board[playerPos[curP]];
                 if (curTile != null && curTile.owner == -1 && (curTile.type == TileType.Property || curTile.type == TileType.Railroad || curTile.type == TileType.Utility))
                 {
                     StartCoroutine(RunPropertyAuctionCoroutine(curTile));
@@ -1030,13 +1050,13 @@ public partial class TycoonBoardManager : MonoBehaviour
                 else
                 {
                     HideDeedCard();
-                    RefreshDashboard("PASSED ON DEED", "Passing turn to Rival Mogul...");
+                    RefreshDashboard("PASSED ON DEED", "Passing turn to next Mogul...");
                     StartCoroutine(EndPlayerTurn(false));
                 }
             }
             else if (upgradePressed)
             {
-                TryBuildChronologically(0);
+                TryBuildChronologically(curP);
             }
         }
         else if (currentState == TurnState.AuctionInProgress)
@@ -1899,16 +1919,16 @@ public partial class TycoonBoardManager : MonoBehaviour
             switch (currentMatchMode)
             {
                 case MatchMultiplayerMode.VsAIMoguls:
-                    startMenuButtonTexts[0].text = "MODE: HUMAN VS AI MOGULS";
+                    startMenuButtonTexts[0].text = "MODE: SOLO VS AI MOGULS";
                     break;
                 case MatchMultiplayerMode.PassAndPlay:
-                    startMenuButtonTexts[0].text = "MODE: 1. PASS-AND-PLAY (ROTATION)";
+                    startMenuButtonTexts[0].text = "MODE: PASS-AND-PLAY (1 HEADSET)";
                     break;
                 case MatchMultiplayerMode.LocalWiFiColocation:
-                    startMenuButtonTexts[0].text = "MODE: 2. LOCAL WIFI (COLOCATION)";
+                    startMenuButtonTexts[0].text = "MODE: LOCAL WIFI (PHASE 7 NGO)";
                     break;
                 case MatchMultiplayerMode.OnlineMultiplayer:
-                    startMenuButtonTexts[0].text = "MODE: 3. ONLINE MULTIPLAYER";
+                    startMenuButtonTexts[0].text = "MODE: ONLINE (PHASE 7 NGO)";
                     break;
             }
         }
@@ -1964,6 +1984,13 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     public void LaunchEmpireMatch()
     {
+        if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation || currentMatchMode == MatchMultiplayerMode.OnlineMultiplayer)
+        {
+            RefreshDashboard("MULTI-HEADSET MODE REQUIRES PHASE 7", "Please select SOLO VS AI or PASS-AND-PLAY for current standalone build.");
+            return;
+        }
+
+        CurrentTurnPlayer = 0;
         if (currentMatchMode == MatchMultiplayerMode.PassAndPlay)
         {
             isPassAndPlayMode = true;
@@ -1972,11 +1999,6 @@ public partial class TycoonBoardManager : MonoBehaviour
         else
         {
             isPassAndPlayMode = false;
-        }
-
-        if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation || currentMatchMode == MatchMultiplayerMode.OnlineMultiplayer)
-        {
-            OnMultiplayerMatchRequested?.Invoke(currentMatchMode);
         }
 
         for (int i = 0; i < 4; i++)

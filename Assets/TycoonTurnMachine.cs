@@ -56,43 +56,44 @@ public partial class TycoonBoardManager
         bool isDoubles = (d1 == d2);
         currentState = TurnState.Moving;
 
-        if (inJail[0])
+        int p = CurrentTurnPlayer;
+        if (inJail[p])
         {
             if (isDoubles)
             {
-                inJail[0] = false;
-                ShatterJailCage(0);
+                inJail[p] = false;
+                ShatterJailCage(p);
                 RefreshDashboard($"ROLLED DOUBLES [{d1}+{d2}]!", "Laser Cage shattered! Released from Jail!");
                 yield return new WaitForSeconds(0.8f);
             }
             else
             {
-                playerCash[0] -= 50;
+                playerCash[p] -= 50;
                 freeParkingJackpot += 50;
-                inJail[0] = false;
-                ShatterJailCage(0);
+                inJail[p] = false;
+                ShatterJailCage(p);
                 RefreshDashboard($"PAID $50 BAIL [{d1}+{d2}]", "Laser Cage shattered! Bail added to Free Parking Jackpot!");
                 yield return new WaitForSeconds(0.8f);
             }
         }
-
         if (isDoubles) consecutiveDoubles++;
         else consecutiveDoubles = 0;
 
         if (consecutiveDoubles >= 3)
         {
             consecutiveDoubles = 0;
-            SendToJail(0);
+            SendToJail(p);
             SetRivalReaction(AvatarMood.HappyCheer, "Haha! Caught speeding 3 times—enjoy Jail!");
-            RefreshDashboard("3X DOUBLES SPEEDING!", "Sent directly to JAIL!");
+            RefreshDashboard($"{GetPlayerName(p).ToUpper()}: 3X DOUBLES SPEEDING!", "Sent directly to JAIL!");
             yield return new WaitForSeconds(1.2f);
             StartCoroutine(EndPlayerTurn(false));
             yield break;
         }
 
-        RefreshDashboard($"YOU ROLLED [{d1} + {d2} = {lastDiceTotal}]" + (isDoubles ? " (DOUBLES!)" : ""), $"Moving {lastDiceTotal} steps clockwise...");
-        yield return StartCoroutine(MoveTokenSteps(0, lastDiceTotal));
-        yield return StartCoroutine(EvaluateTileLanding(0, isDoubles));
+        string rollWho = (p == 0 && !isPassAndPlayMode) ? "YOU" : GetPlayerName(p).ToUpper();
+        RefreshDashboard($"{rollWho} ROLLED [{d1} + {d2} = {lastDiceTotal}]" + (isDoubles ? " (DOUBLES!)" : ""), $"Moving {lastDiceTotal} steps clockwise...");
+        yield return StartCoroutine(MoveTokenSteps(p, lastDiceTotal));
+        yield return StartCoroutine(EvaluateTileLanding(p, isDoubles));
     }
 
     IEnumerator MoveTokenSteps(int playerIdx, int steps)
@@ -159,15 +160,15 @@ public partial class TycoonBoardManager
             case TileType.Utility:
                 if (tile.owner == -1)
                 {
-                    if (playerIdx == 0)
+                    if (IsHumanPlayer(playerIdx))
                     {
                         ShowDeedCardForTile(tile);
-                        if (playerCash[0] >= tile.price)
+                        if (playerCash[playerIdx] >= tile.price)
                         {
                             currentState = TurnState.BuyOrPassDecision;
                             SetRivalReaction(1, AvatarMood.Thinking, $"Thinking about buying {tile.name}?");
                             RefreshDashboard(
-                                $"LANDED ON {tile.name} (${tile.price})",
+                                $"{who} LANDED ON {tile.name} (${tile.price})",
                                 "Stamp Seal or Right Pinch to BUY | Rip Contract or Left Pinch to PASS"
                             );
 
@@ -178,7 +179,7 @@ public partial class TycoonBoardManager
                                     $"Base Rent: ${tile.rentByLevel[0]}\nFull Set Rent: ${tile.rentByLevel[0] * 2}\nTouch STAMP SEAL to Buy, or RIP to Pass.",
                                     () =>
                                     {
-                                        PurchaseCurrentTile(0);
+                                        PurchaseCurrentTile(playerIdx);
                                         tactileInteractions.DismissTradeContract();
                                     },
                                     () =>
@@ -312,7 +313,7 @@ public partial class TycoonBoardManager
                         minigameOrchestrator.CancelActiveMinigame();
                     }
                     taxDue = Mathf.Max(10, tile.price - discountWon);
-                    playerCash[0] -= taxDue;
+                    playerCash[playerIdx] -= taxDue;
                     freeParkingJackpot += taxDue;
                     PlaySFX(cashRegisterSound, procCashClip, 0.95f);
                     RefreshDashboard($"ASSESSED {tile.name}: PAID ${taxDue}!", $"Deduction saved you ${discountWon}! ${taxDue} added to Free Parking Jackpot.");
@@ -417,10 +418,10 @@ public partial class TycoonBoardManager
                         Debug.LogWarning("[TycoonTurnMachine] Vault cash swat minigame timed out after 25s. Recovering turn flow safely.");
                         minigameOrchestrator.CancelActiveMinigame();
                     }
-                    playerCash[0] += wonCash;
+                    playerCash[playerIdx] += wonCash;
                     PlaySFX(cashRegisterSound, procCashClip, 1.15f);
                     if (jackpotGoldPile != null)
-                        StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[0].position, Mathf.Min(12, wonCash / 25)));
+                        StartCoroutine(SpawnFlyingCoinsStream(jackpotGoldPile.position, playerTokens[playerIdx].position, Mathf.Min(12, wonCash / 25)));
                     RefreshDashboard($"VAULT CASH COLLECTED: +${wonCash}!", $"Bank Error payout credited to your account.");
                 }
                 else
@@ -477,10 +478,10 @@ public partial class TycoonBoardManager
                         minigameOrchestrator.CancelActiveMinigame();
                     }
                     repairBill = Mathf.Max(10, 100 - discountWon);
-                    playerCash[0] -= repairBill;
+                    playerCash[playerIdx] -= repairBill;
                     freeParkingJackpot += repairBill;
                     if (jackpotGoldPile != null)
-                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, jackpotGoldPile.position, Mathf.Max(2, repairBill / 20)));
+                        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, jackpotGoldPile.position, Mathf.Max(2, repairBill / 20)));
                     RefreshDashboard($"REPAIRS COMPLETE: PAID ${repairBill}!", $"Quick handiwork saved you ${discountWon}! Paid ${repairBill} into Jackpot.");
                 }
                 else
@@ -698,129 +699,168 @@ public partial class TycoonBoardManager
 
     IEnumerator EndPlayerTurn(bool playerRolledDoubles)
     {
-        if (playerCash[0] < 0)
+        int p = CurrentTurnPlayer;
+
+        // 1. Check current player bankruptcy
+        if (playerCash[p] < 0)
         {
-            AttemptEmergencyBankruptcyLiquidation(0);
-            if (playerCash[0] < 0)
+            AttemptEmergencyBankruptcyLiquidation(p);
+            if (playerCash[p] < 0)
             {
-                SetRivalReaction(1, AvatarMood.HappyCheer, "Look who's bankrupt! The boardroom belongs to us!");
-                RefreshDashboard("BANKRUPTCY! AI RIVALS WIN!", "Touch [NEW GAME] or press N to launch a fresh match!");
+                EliminatePlayerForBankruptcy(p);
+                if (CheckAllRivalsBankrupt() || GetRemainingActivePlayerCount() <= 1)
+                {
+                    HandleVictoryState();
+                    yield break;
+                }
+            }
+        }
+
+        // 2. Check doubles bonus roll
+        if (playerRolledDoubles && !inJail[p] && !isBankrupt[p])
+        {
+            currentState = TurnState.WaitingForRoll;
+            RefreshDashboard($"{GetPlayerName(p).ToUpper()}: DOUBLES BONUS ROLL!", "Throw the 3D Dice again!");
+            yield break;
+        }
+
+        // 3. Find next active (non-bankrupt) seat
+        int nextSeat = (p + 1) % activePlayerCount;
+        int checkCount = 0;
+        while (isBankrupt[nextSeat] && checkCount < activePlayerCount)
+        {
+            nextSeat = (nextSeat + 1) % activePlayerCount;
+            checkCount++;
+        }
+
+        if (checkCount >= activePlayerCount)
+        {
+            HandleVictoryState();
+            yield break;
+        }
+
+        // Round wrap-around check
+        if (nextSeat <= p)
+        {
+            totalTurnsCompleted++;
+            if (totalTurnsCompleted % 5 == 0)
+            {
+                ShiftMarketCycle();
+            }
+            SaveGameState();
+        }
+
+        CurrentTurnPlayer = nextSeat;
+        OnTurnStarted?.Invoke(nextSeat);
+
+        if (IsHumanPlayer(nextSeat))
+        {
+            if (isPassAndPlayMode)
+            {
+                currentState = TurnState.Handover;
+                HideDeedCard();
+                if (spatialAnchorAndDiorama != null)
+                {
+                    spatialAnchorAndDiorama.RotateBoardToSeat(nextSeat);
+                }
+                RefreshDashboard(
+                    $"PASS HEADSET TO {GetPlayerName(nextSeat).ToUpper()}!",
+                    "Put on headset and throw dice when ready to take your turn!"
+                );
+                yield return new WaitForSeconds(0.85f);
                 currentState = TurnState.WaitingForRoll;
-                yield break;
             }
-        }
-
-        for (int a = 1; a < activePlayerCount; a++)
-        {
-            if (!isBankrupt[a] && playerCash[a] < 0)
+            else
             {
-                AttemptEmergencyBankruptcyLiquidation(a);
-                if (playerCash[a] < 0)
+                currentState = TurnState.WaitingForRoll;
+                if (inJail[nextSeat])
                 {
-                    EliminatePlayerForBankruptcy(a);
+                    RefreshDashboard("IN JAIL!", "POKE [BUY DEED] TO PAY $50 BAIL NOW, OR THROW DICE FOR DOUBLES!");
+                }
+                else
+                {
+                    RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
                 }
             }
-        }
-
-        if (CheckAllRivalsBankrupt())
-        {
-            SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
-            RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
-            SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
-            OnVictoryTrophyTriggered?.Invoke();
-            currentState = TurnState.WaitingForRoll;
-            yield break;
-        }
-
-        if (playerRolledDoubles && !inJail[0])
-        {
-            currentState = TurnState.WaitingForRoll;
-            CurrentTurnPlayer = 0;
-            OnTurnStarted?.Invoke(0);
-            RefreshDashboard("DOUBLES BONUS ROLL!", "Pinch to Distance-Pull & Throw the 3D Dice again!");
-            yield break;
-        }
-
-        currentState = TurnState.AITurn;
-
-        int buildThreshold = (aiDifficulty == AIDifficulty.Billionaire) ? 300 : ((aiDifficulty == AIDifficulty.Casual) ? 750 : 500);
-
-        for (int aiIdx = 1; aiIdx < activePlayerCount; aiIdx++)
-        {
-            if (isBankrupt[aiIdx]) continue;
-            CurrentTurnPlayer = aiIdx;
-            OnTurnStarted?.Invoke(aiIdx);
-
-            SetRivalReaction(aiIdx, AvatarMood.Thinking, $"{GetPlayerName(aiIdx)}: My turn! Analyzing the board...");
-            yield return new WaitForSeconds(0.65f);
-
-            // AI Upgrade phase
-            if (playerCash[aiIdx] > buildThreshold)
-            {
-                TryBuildChronologically(aiIdx);
-                yield return new WaitForSeconds(0.45f);
-            }
-
-            // AI Roll dice
-            int aiD1 = UnityEngine.Random.Range(1, 7);
-            int aiD2 = UnityEngine.Random.Range(1, 7);
-            lastDiceTotal = aiD1 + aiD2;
-            if (die1Transform != null) die1Transform.localRotation = GetFlatDieRotationForValue(aiD1);
-            if (die2Transform != null) die2Transform.localRotation = GetFlatDieRotationForValue(aiD2);
-            PlaySFX(diceRollSound, procDiceClip, 0.95f);
-
-            if (inJail[aiIdx])
-            {
-                inJail[aiIdx] = false;
-                playerCash[aiIdx] -= 50;
-                freeParkingJackpot += 50;
-                ShatterJailCage(aiIdx);
-            }
-
-            RefreshDashboard($"{GetPlayerName(aiIdx).ToUpper()} ROLLED [{aiD1}+{aiD2}={lastDiceTotal}]", $"{GetPlayerName(aiIdx)} is advancing {lastDiceTotal} steps clockwise...");
-            yield return StartCoroutine(MoveTokenSteps(aiIdx, lastDiceTotal));
-            yield return StartCoroutine(EvaluateTileLanding(aiIdx, false));
-
-            if (playerCash[aiIdx] < 0)
-            {
-                AttemptEmergencyBankruptcyLiquidation(aiIdx);
-                if (playerCash[aiIdx] < 0)
-                {
-                    EliminatePlayerForBankruptcy(aiIdx);
-                    if (CheckAllRivalsBankrupt())
-                    {
-                        SetRivalReaction(1, AvatarMood.AngrySlam, "All rivals are bankrupt! You conquer the entire empire!");
-                        RefreshDashboard("VICTORY! ALL RIVALS BANKRUPT!", "You conquered the 40-Tile Metropolis Empire! Monopoly Master!");
-                        SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
-                        OnVictoryTrophyTriggered?.Invoke();
-                        currentState = TurnState.WaitingForRoll;
-                        yield break;
-                    }
-                }
-            }
-
-            yield return new WaitForSeconds(0.5f);
-        }
-
-        totalTurnsCompleted++;
-        if (totalTurnsCompleted % 5 == 0)
-        {
-            ShiftMarketCycle();
-        }
-
-        SaveGameState();
-
-        currentState = TurnState.WaitingForRoll;
-        CurrentTurnPlayer = 0;
-        OnTurnStarted?.Invoke(0);
-        if (inJail[0])
-        {
-            RefreshDashboard("IN JAIL!", "IN JAIL! POKE [BUY DEED] TO PAY $50 BAIL NOW, OR THROW DICE FOR DOUBLES!");
         }
         else
         {
-            RefreshDashboard("YOUR TURN — DISTANCE-GRAB & THROW DICE", "Pinch with your hand to Pull & Throw the 3D Dice | Touch [TAKEOVER] to buy out AI!");
+            // Execute AI Turn for nextSeat
+            currentState = TurnState.AITurn;
+            yield return StartCoroutine(ExecuteSingleAITurn(nextSeat));
         }
+    }
+
+    IEnumerator ExecuteSingleAITurn(int aiIdx)
+    {
+        if (isBankrupt[aiIdx]) yield break;
+
+        SetRivalReaction(aiIdx, AvatarMood.Thinking, $"{GetPlayerName(aiIdx)}: My turn! Analyzing the board...");
+        yield return new WaitForSeconds(0.65f);
+
+        // AI Upgrade phase
+        int buildThreshold = (aiDifficulty == AIDifficulty.Billionaire) ? 300 : ((aiDifficulty == AIDifficulty.Casual) ? 750 : 500);
+        if (playerCash[aiIdx] > buildThreshold)
+        {
+            TryBuildChronologically(aiIdx);
+            yield return new WaitForSeconds(0.45f);
+        }
+
+        // AI Roll dice
+        int aiD1 = UnityEngine.Random.Range(1, 7);
+        int aiD2 = UnityEngine.Random.Range(1, 7);
+        bool aiDoubles = (aiD1 == aiD2);
+        lastDiceTotal = aiD1 + aiD2;
+        if (die1Transform != null) die1Transform.localRotation = GetFlatDieRotationForValue(aiD1);
+        if (die2Transform != null) die2Transform.localRotation = GetFlatDieRotationForValue(aiD2);
+        PlaySFX(diceRollSound, procDiceClip, 0.95f);
+
+        if (inJail[aiIdx])
+        {
+            inJail[aiIdx] = false;
+            playerCash[aiIdx] -= 50;
+            freeParkingJackpot += 50;
+            ShatterJailCage(aiIdx);
+        }
+
+        RefreshDashboard($"{GetPlayerName(aiIdx).ToUpper()} ROLLED [{aiD1}+{aiD2}={lastDiceTotal}]", $"{GetPlayerName(aiIdx)} is advancing {lastDiceTotal} steps clockwise...");
+        yield return StartCoroutine(MoveTokenSteps(aiIdx, lastDiceTotal));
+        yield return StartCoroutine(EvaluateTileLanding(aiIdx, aiDoubles));
+
+        if (playerCash[aiIdx] < 0)
+        {
+            AttemptEmergencyBankruptcyLiquidation(aiIdx);
+            if (playerCash[aiIdx] < 0)
+            {
+                EliminatePlayerForBankruptcy(aiIdx);
+                if (CheckAllRivalsBankrupt() || GetRemainingActivePlayerCount() <= 1)
+                {
+                    HandleVictoryState();
+                    yield break;
+                }
+            }
+        }
+
+        yield return new WaitForSeconds(0.5f);
+        StartCoroutine(EndPlayerTurn(aiDoubles));
+    }
+
+    private void HandleVictoryState()
+    {
+        string winnerName = "YOU";
+        for (int i = 0; i < activePlayerCount; i++)
+        {
+            if (!isBankrupt[i])
+            {
+                winnerName = GetPlayerName(i).ToUpper();
+                break;
+            }
+        }
+        SetRivalReaction(1, AvatarMood.AngrySlam, $"{winnerName} conquers the entire empire!");
+        RefreshDashboard($"VICTORY! {winnerName} CONQUERED THE BOARD!", "Boardroom Champion! Monopoly Master!");
+        SpawnCelebrationFireworks(transform.position + Vector3.up * 0.15f);
+        OnVictoryTrophyTriggered?.Invoke();
+        currentState = TurnState.WaitingForRoll;
     }
 
     void ShiftMarketCycle()

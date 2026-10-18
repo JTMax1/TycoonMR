@@ -813,24 +813,25 @@ public partial class TycoonBoardManager
 
     void ExecuteMortgageOrUnmortgage(BoardTile tile)
     {
-        if (tile == null || tile.owner != 0) return;
+        if (tile == null || tile.owner < 0 || tile.owner >= activePlayerCount) return;
+        int owner = tile.owner;
 
         if (!tile.isMortgaged)
         {
             if (tile.buildingLevel > 0)
             {
                 int refund = tile.buildCost / 2;
-                playerCash[0] += refund;
+                playerCash[owner] += refund;
                 tile.buildingLevel--;
                 if (tile.spawnedBuilding != null) Destroy(tile.spawnedBuilding);
                 if (tile.buildingLevel > 0) ConstructChronological3DBuilding(tile);
                 PlaySFX(cashRegisterSound, procBuildClip, 1.1f);
-                RefreshDashboard($"SOLD BUILDING ON {tile.name} (+${refund})", $"Building level reduced to {tile.buildingLevel}/5. Cash: ${playerCash[0]}");
+                RefreshDashboard($"SOLD BUILDING ON {tile.name} (+${refund})", $"Building level reduced to {tile.buildingLevel}/5. Cash: ${playerCash[owner]}");
             }
             else
             {
                 int mortgageValue = tile.price / 2;
-                playerCash[0] += mortgageValue;
+                playerCash[owner] += mortgageValue;
                 tile.isMortgaged = true;
                 if (tile.ownershipBadge != null)
                 {
@@ -838,19 +839,19 @@ public partial class TycoonBoardManager
                     if (r != null) r.material = CreateColoredMaterial(new Color(0.48f, 0.12f, 0.16f), 0.95f);
                 }
                 PlaySFX(cashRegisterSound, procDiceClip, 0.95f);
-                RefreshDashboard($"MORTGAGED {tile.name} (+${mortgageValue})", $"Property mortgaged! Rent is now $0. Cash: ${playerCash[0]}");
+                RefreshDashboard($"MORTGAGED {tile.name} (+${mortgageValue})", $"Property mortgaged! Rent is now $0. Cash: ${playerCash[owner]}");
             }
         }
         else
         {
             int unmortgageCost = (int)(tile.price * 0.55f);
-            if (playerCash[0] < unmortgageCost)
+            if (playerCash[owner] < unmortgageCost)
             {
                 RefreshDashboard($"NEED ${unmortgageCost} TO UNMORTGAGE", $"Insufficient cash to unmortgage {tile.name}.");
                 return;
             }
 
-            playerCash[0] -= unmortgageCost;
+            playerCash[owner] -= unmortgageCost;
             tile.isMortgaged = false;
             if (tile.ownershipBadge != null)
             {
@@ -858,7 +859,7 @@ public partial class TycoonBoardManager
                 if (r != null) r.material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.95f);
             }
             PlaySFX(cashRegisterSound, procStepClip, 1.15f);
-            RefreshDashboard($"UNMORTGAGED {tile.name} (-${unmortgageCost})", $"Property active! Full rent restored. Cash: ${playerCash[0]}");
+            RefreshDashboard($"UNMORTGAGED {tile.name} (-${unmortgageCost})", $"Property active! Full rent restored. Cash: ${playerCash[owner]}");
         }
 
         ShowDeedCardForTile(tile);

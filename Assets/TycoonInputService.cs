@@ -471,7 +471,7 @@ public partial class TycoonBoardManager
             if (!heldPinch || grabbableDeedCrystal.transform.localPosition.y < 0.08f)
             {
                 isHoldingDeedCrystal = false;
-                PurchaseCurrentTile(0);
+                PurchaseCurrentTile(CurrentTurnPlayer);
             }
         }
     }

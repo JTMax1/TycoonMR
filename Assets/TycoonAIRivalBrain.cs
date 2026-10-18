@@ -296,10 +296,11 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     public void TryExecuteHostileTakeover()
     {
-        BoardTile currentTile = board[playerPos[0]];
+        int actingPlayer = CurrentTurnPlayer;
+        BoardTile currentTile = board[playerPos[actingPlayer]];
         BoardTile targetTile = null;
 
-        if (currentTile.owner > 0 && currentTile.owner < activePlayerCount && (currentTile.type == TileType.Property || currentTile.type == TileType.Railroad || currentTile.type == TileType.Utility))
+        if (currentTile.owner >= 0 && currentTile.owner != actingPlayer && currentTile.owner < activePlayerCount && (currentTile.type == TileType.Property || currentTile.type == TileType.Railroad || currentTile.type == TileType.Utility))
         {
             targetTile = currentTile;
         }
@@ -307,7 +308,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         {
             for (int i = 0; i < 40; i++)
             {
-                if (board[i].owner > 0 && board[i].owner < activePlayerCount && board[i].colorGroup >= 0 && PlayerOwnsAnyInGroup(0, board[i].colorGroup))
+                if (board[i].owner >= 0 && board[i].owner != actingPlayer && board[i].owner < activePlayerCount && board[i].colorGroup >= 0 && PlayerOwnsAnyInGroup(actingPlayer, board[i].colorGroup))
                 {
                     targetTile = board[i];
                     break;
@@ -317,7 +318,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             {
                 for (int i = 0; i < 40; i++)
                 {
-                    if (board[i].owner > 0 && board[i].owner < activePlayerCount)
+                    if (board[i].owner >= 0 && board[i].owner != actingPlayer && board[i].owner < activePlayerCount)
                     {
                         targetTile = board[i];
                         break;
@@ -336,28 +337,28 @@ public partial class TycoonBoardManager : MonoBehaviour
         string rivalName = GetPlayerName(rivalOwner);
 
         int buyoutPrice = (targetTile.price * 2) + (targetTile.buildingLevel * targetTile.buildCost);
-        if (playerCash[0] < buyoutPrice)
+        if (playerCash[actingPlayer] < buyoutPrice)
         {
             RefreshDashboard($"HOSTILE TAKEOVER NEEDS ${buyoutPrice}", $"You need ${buyoutPrice} to force {rivalName} to sell {targetTile.name}!");
             SetRivalReaction(rivalOwner, AvatarMood.HappyCheer, $"Haha! You can't afford to buy out {targetTile.name}!");
             return;
         }
 
-        playerCash[0] -= buyoutPrice;
+        playerCash[actingPlayer] -= buyoutPrice;
         playerCash[rivalOwner] += buyoutPrice;
-        targetTile.owner = 0;
+        targetTile.owner = actingPlayer;
 
         PlaySFX(cashRegisterSound, procCashClip, 1.3f);
         PlaySFX(buildUpgradeSound, procBuildClip, 1.15f);
-        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, playerTokens[rivalOwner].position, 10));
+        StartCoroutine(SpawnFlyingCoinsStream(playerTokens[actingPlayer].position, playerTokens[rivalOwner].position, 10));
 
-        ApplyTileOwnershipVisuals(targetTile, 0);
+        ApplyTileOwnershipVisuals(targetTile, actingPlayer);
         RebuildMonopolySynergyBeams();
-        SetRivalReaction(rivalOwner, AvatarMood.AngrySlam, $"NO! You seized {targetTile.name} in a Hostile Takeover!");
-        ShowSpecialEventCard("HOSTILE TAKEOVER!", $"You paid ${buyoutPrice} to seize\n<b>{targetTile.name}</b>\nfrom {rivalName}!", new Color(0.95f, 0.74f, 0.15f));
+        SetRivalReaction(rivalOwner, AvatarMood.AngrySlam, $"NO! {GetPlayerName(actingPlayer)} seized {targetTile.name} in a Hostile Takeover!");
+        ShowSpecialEventCard("HOSTILE TAKEOVER!", $"{GetPlayerName(actingPlayer)} paid ${buyoutPrice} to seize\n<b>{targetTile.name}</b>\nfrom {rivalName}!", new Color(0.95f, 0.74f, 0.15f));
         RefreshDashboard($"HOSTILE TAKEOVER: SEIZED {targetTile.name}!", $"Paid ${buyoutPrice} buyout to {rivalName}! Property is now YOURS!");
 
-        if (OwnsFullColorGroup(0, targetTile.colorGroup))
+        if (OwnsFullColorGroup(actingPlayer, targetTile.colorGroup))
         {
             SpawnCelebrationFireworks(targetTile.tileTransform != null ? targetTile.tileTransform.position : transform.position);
         }
@@ -639,8 +640,9 @@ public partial class TycoonBoardManager : MonoBehaviour
             aiDroppedOut[a] = false;
         }
 
+        int humanPlayer = CurrentTurnPlayer;
         float timer = 6.0f;
-        bool playerDroppedOut = isBankrupt != null && isBankrupt[0];
+        bool playerDroppedOut = isBankrupt != null && isBankrupt[humanPlayer];
         auctionPlayerBidFlag = false;
         auctionPlayerDropFlag = false;
 
@@ -657,28 +659,28 @@ public partial class TycoonBoardManager : MonoBehaviour
             }
             timer -= Time.deltaTime;
 
-            if (!playerDroppedOut)
+            if (!playerDroppedOut && IsHumanPlayer(humanPlayer))
             {
                 if (auctionPlayerDropFlag)
                 {
                     auctionPlayerDropFlag = false;
                     playerDroppedOut = true;
-                    RefreshDashboard("AUCTION: YOU DROPPED OUT!", "You conceded the auction to Rival Moguls.");
+                    RefreshDashboard("AUCTION: DROPPED OUT!", $"{GetPlayerName(humanPlayer)} conceded the auction.");
                     PlaySFX(tokenMoveSound, procStepClip, 0.8f);
                 }
                 if (auctionPlayerBidFlag)
                 {
                     auctionPlayerBidFlag = false;
                     int nextPlayerBid = (highestBidder == -1) ? currentBid : currentBid + 20;
-                    if (playerCash[0] >= nextPlayerBid)
+                    if (playerCash[humanPlayer] >= nextPlayerBid)
                     {
                         currentBid = nextPlayerBid;
-                        highestBidder = 0;
+                        highestBidder = humanPlayer;
                         timer = Mathf.Max(timer, 2.5f);
                         PlaySFX(cashRegisterSound, procCashClip, 1.2f);
                         StartCoroutine(AnimateGavelStrike(gavel));
-                        colocationAndPolish?.BroadcastAuctionBid(0, currentBid);
-                        SetRivalReaction(1, AvatarMood.Neutral, $"You raised to ${currentBid}?! Let me calculate...");
+                        colocationAndPolish?.BroadcastAuctionBid(humanPlayer, currentBid);
+                        SetRivalReaction(1, AvatarMood.Neutral, $"{GetPlayerName(humanPlayer)} raised to ${currentBid}?! Let me calculate...");
                     }
                     else
                     {
@@ -687,8 +689,9 @@ public partial class TycoonBoardManager : MonoBehaviour
                 }
             }
 
-            for (int a = 1; a < activePlayerCount; a++)
+            for (int a = 0; a < activePlayerCount; a++)
             {
+                if (IsHumanPlayer(a)) continue;
                 if (!aiDroppedOut[a] && Time.time >= nextAiBidTimes[a] && highestBidder != a)
                 {
                     int nextAiBid = (highestBidder == -1) ? currentBid : currentBid + 20;
@@ -712,7 +715,7 @@ public partial class TycoonBoardManager : MonoBehaviour
                 }
             }
 
-            string bidderName = (highestBidder == 0) ? "YOU" : (highestBidder > 0 ? GetPlayerName(highestBidder).ToUpper() : "NONE");
+            string bidderName = (highestBidder == humanPlayer && !isPassAndPlayMode) ? "YOU" : (highestBidder >= 0 ? GetPlayerName(highestBidder).ToUpper() : "NONE");
             RefreshDashboard(
                 $"AUCTION: {tile.name.ToUpper()} — HIGH BID: ${currentBid} ({bidderName})",
                 $"Timer: {timer:F1}s | Right-Pinch/B: +$20 Raise | Left-Pinch/P: Drop Out"
@@ -738,19 +741,7 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         if (gavel != null) Destroy(gavel);
 
-        if (highestBidder == 0)
-        {
-            playerCash[0] -= currentBid;
-            tile.owner = 0;
-            // Deeds won at auction start at Level 0 (unimproved) per official rules
-            ApplyTileOwnershipVisuals(tile, 0);
-            RebuildMonopolySynergyBeams();
-            PlaySFX(cashRegisterSound, procCashClip, 1.25f);
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, tile.tileTransform.position, 6));
-            RefreshDashboard($"AUCTION WON BY YOU FOR ${currentBid}!", $"Acquired {tile.name} deed at auction!");
-            SetRivalReaction(1, AvatarMood.AngrySlam, $"You sniped {tile.name} for ${currentBid}... well played.");
-        }
-        else if (highestBidder > 0)
+        if (highestBidder >= 0)
         {
             playerCash[highestBidder] -= currentBid;
             tile.owner = highestBidder;
@@ -758,9 +749,15 @@ public partial class TycoonBoardManager : MonoBehaviour
             ApplyTileOwnershipVisuals(tile, highestBidder);
             RebuildMonopolySynergyBeams();
             PlaySFX(cashRegisterSound, procCashClip, 1.25f);
-            StartCoroutine(SpawnFlyingCoinsStream(playerTokens[highestBidder].position, tile.tileTransform.position, 6));
-            RefreshDashboard($"AUCTION WON BY {GetPlayerName(highestBidder).ToUpper()} FOR ${currentBid}!", $"{GetPlayerName(highestBidder)} claimed {tile.name} deed at auction!");
-            SetRivalReaction(highestBidder, AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
+            if (playerTokens != null && highestBidder < playerTokens.Length && playerTokens[highestBidder] != null && tile.tileTransform != null)
+                StartCoroutine(SpawnFlyingCoinsStream(playerTokens[highestBidder].position, tile.tileTransform.position, 6));
+
+            string winWho = (highestBidder == humanPlayer && !isPassAndPlayMode) ? "YOU" : GetPlayerName(highestBidder).ToUpper();
+            RefreshDashboard($"AUCTION WON BY {winWho} FOR ${currentBid}!", $"Acquired {tile.name} deed at auction!");
+            if (highestBidder == humanPlayer)
+                SetRivalReaction(1, AvatarMood.AngrySlam, $"{winWho} sniped {tile.name} for ${currentBid}... well played.");
+            else
+                SetRivalReaction(highestBidder, AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
         }
         else
         {
