@@ -207,15 +207,6 @@ public class TycoonTactileInteractions : MonoBehaviour
         Material goldTrimMat = boardManager.CreateColoredMaterial(new Color(0.85f, 0.68f, 0.24f), 0.85f, 0.8f);
         Material waxSealMat = boardManager.CreateColoredMaterial(new Color(0.82f, 0.15f, 0.18f), 0.65f, 0.1f);
 
-        // Optional custom Trade Contract Prefab
-        if (boardManager.tradeContractPrefab != null)
-        {
-            GameObject customContract = Instantiate(boardManager.tradeContractPrefab, activeContractScroll.transform, false);
-            boardManager.StripRoguePhysicsFromImportedPrefab(customContract);
-            boardManager.NormalizePrefabSize(customContract, 0.32f);
-            customContract.transform.localPosition = new Vector3(0f, 0f, 0.01f);
-        }
-
         // --- LEFT HALF ---
         GameObject leftHalfGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
         leftHalfGO.name = "Contract_LeftHalf";

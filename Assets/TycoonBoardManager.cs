@@ -425,6 +425,7 @@ public partial class TycoonBoardManager : MonoBehaviour
     // Meta XR Interaction SDK Hand & Poke References
     private PokeInteractor[] scenePokeInteractors;
     private OVRHand[] sceneOVRHands;
+    private OVRSkeleton[] sceneSkeletons;
     private Transform activeHandGrabTransform;
     private Vector3 leftHandWorldPos = new Vector3(0f, -100f, 0f);
     private Vector3 rightHandWorldPos = new Vector3(0f, -100f, 0f);
@@ -512,6 +513,21 @@ public partial class TycoonBoardManager : MonoBehaviour
             if (sim != null) sim.enabled = false;
         }
 
+        // 1c. Deactivate rogue matchmaking/colocation building blocks that cause startup errors
+        string[] blocksToDeactivate = new string[]
+        {
+            "[BuildingBlock] Auto Matchmaking",
+            "[BuildingBlock] Custom Matchmaking",
+            "[BuildingBlock] Local Matchmaking",
+            "[BuildingBlock] Colocation",
+            "[BuildingBlock] MR Utility Kit"
+        };
+        foreach (string blockName in blocksToDeactivate)
+        {
+            GameObject bGo = GameObject.Find(blockName);
+            if (bGo != null) bGo.SetActive(false);
+        }
+
         // 2. Prefab safety guards against rogue Meta SDK assets
         if (tradeContractPrefab != null && (tradeContractPrefab.name.Contains("Microgesture") || tradeContractPrefab.name.Contains("Spawner") || tradeContractPrefab.name.Contains("NGO")))
             tradeContractPrefab = null;
@@ -530,10 +546,18 @@ public partial class TycoonBoardManager : MonoBehaviour
                 if (buildingBlockGrabTemplate == null) buildingBlockGrabTemplate = go;
                 go.SetActive(false);
             }
-            else if ((go.name.Contains("PokeInteraction") || go.name.Contains("Poke Interaction") || go.name == "Poke Interaction"))
+            else if (go.name == "[BuildingBlock] Auto Matchmaking" ||
+                     go.name == "[BuildingBlock] Custom Matchmaking" ||
+                     go.name == "[BuildingBlock] Local Matchmaking" ||
+                     go.name == "[BuildingBlock] Colocation" ||
+                     go.name == "[BuildingBlock] MR Utility Kit")
+            {
+                go.SetActive(false);
+            }
+            else if (go.name.Contains("PokeInteraction") || go.name.Contains("Poke Interaction") || go.name == "Poke Interaction")
             {
                 if (buildingBlockPokeTemplate == null) buildingBlockPokeTemplate = go;
-                go.SetActive(false);
+                // Keep poke interactors active so poking functions natively!
             }
         }
 
@@ -636,10 +660,22 @@ public partial class TycoonBoardManager : MonoBehaviour
 #pragma warning disable CS0618
         OVRPassthroughLayer[] layers = Object.FindObjectsByType<OVRPassthroughLayer>(FindObjectsSortMode.None);
 #pragma warning restore CS0618
+        if (passthroughLayer == null && layers.Length > 0)
+        {
+            passthroughLayer = layers[0];
+        }
+
         for (int i = 0; i < layers.Length; i++)
         {
             if (layers[i] == null) continue;
-            if (passthroughLayer == null) passthroughLayer = layers[i];
+            if (layers[i] == passthroughLayer)
+            {
+                layers[i].enabled = true;
+            }
+            else
+            {
+                layers[i].enabled = false;
+            }
         }
     }
 
@@ -1120,9 +1156,10 @@ public partial class TycoonBoardManager : MonoBehaviour
         if (moodPressed) ToggleMarketAtmosphere();
         if (vrViewPressed) TogglePenthouseScaleShift();
 
-        if (isHudDirty)
+        if (isHudDirty || currentState != lastContextualState)
         {
             isHudDirty = false;
+            lastContextualState = currentState;
             UpdateLiveHUDStats();
             UpdateContextualActionButtons();
         }
@@ -1751,12 +1788,21 @@ public partial class TycoonBoardManager : MonoBehaviour
         c.renderMode = RenderMode.WorldSpace;
         canvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(1040f, 400f);
 
-        dashboardStatsTMP = CreateUGUIText(canvasGO.transform, "LiveStats", new Vector2(0, 130), 22, new Color(0.35f, 0.95f, 0.60f));
-        dashboardStatsTMP.rectTransform.sizeDelta = new Vector2(1000f, 60f);
+        dashboardStatsTMP = CreateUGUIText(canvasGO.transform, "LiveStats", new Vector2(0, 145), 20, new Color(0.35f, 0.95f, 0.60f));
+        dashboardStatsTMP.rectTransform.sizeDelta = new Vector2(980f, 55f);
+        dashboardStatsTMP.textWrappingMode = TextWrappingModes.Normal;
 
-        dashboardTitleTMP = CreateUGUIText(canvasGO.transform, "Title", new Vector2(0, 65), 32, new Color(1f, 0.84f, 0.32f));
-        dashboardBodyTMP = CreateUGUIText(canvasGO.transform, "Body", new Vector2(0, -10), 27, Color.white);
-        dashboardPromptTMP = CreateUGUIText(canvasGO.transform, "Prompt", new Vector2(0, -90), 22, new Color(0.45f, 0.90f, 1f));
+        dashboardTitleTMP = CreateUGUIText(canvasGO.transform, "Title", new Vector2(0, 82), 28, new Color(1f, 0.84f, 0.32f));
+        dashboardTitleTMP.rectTransform.sizeDelta = new Vector2(980f, 55f);
+        dashboardTitleTMP.textWrappingMode = TextWrappingModes.Normal;
+
+        dashboardBodyTMP = CreateUGUIText(canvasGO.transform, "Body", new Vector2(0, 8), 25, Color.white);
+        dashboardBodyTMP.rectTransform.sizeDelta = new Vector2(960f, 75f);
+        dashboardBodyTMP.textWrappingMode = TextWrappingModes.Normal;
+
+        dashboardPromptTMP = CreateUGUIText(canvasGO.transform, "Prompt", new Vector2(0, -85), 21, new Color(0.45f, 0.90f, 1f));
+        dashboardPromptTMP.rectTransform.sizeDelta = new Vector2(960f, 65f);
+        dashboardPromptTMP.textWrappingMode = TextWrappingModes.Normal;
 
         UpdateLiveHUDStats();
     }
@@ -2024,6 +2070,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
         UpdateActivePlayerVisibilities();
         UpdateStartMenuUI();
+        UpdateContextualActionButtons();
         RefreshDashboard("EXECUTIVE START MENU", "Configure Mode, Rivals, Difficulty, & Starting Capital, then poke [LAUNCH]!");
         SetRivalReaction(1, AvatarMood.Thinking, "Configure the boardroom match! Will you dare face 3 AI Moguls?");
     }
@@ -2074,6 +2121,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         CurrentTurnPlayer = 0;
         OnTurnStarted?.Invoke(0);
         UpdateLiveHUDStats();
+        UpdateContextualActionButtons();
         RefreshDashboard(
             "MATCH LAUNCHED — YOUR TURN!",
             "Point & Pinch to Magnet-Pull the 3D Dice into your palm, shake, and release to Throw!"
@@ -2388,9 +2436,25 @@ public partial class TycoonBoardManager : MonoBehaviour
         return $"MONOPOLIES: {monopolies} | NEAR SET: {nearSetText}";
     }
 
+    private TurnState lastContextualState = (TurnState)(-1);
+
     void UpdateContextualActionButtons()
     {
         if (buttonTransforms == null || buttonTransforms.Length < 10) return;
+
+        if (currentState == TurnState.StartMenu)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                if (buttonTransforms[i] != null) buttonTransforms[i].gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        for (int i = 5; i < 10; i++)
+        {
+            if (buttonTransforms[i] != null) buttonTransforms[i].gameObject.SetActive(true);
+        }
 
         bool canRoll = (currentState == TurnState.WaitingForRoll);
         bool canBuyPass = (currentState == TurnState.BuyOrPassDecision);
@@ -2407,8 +2471,7 @@ public partial class TycoonBoardManager : MonoBehaviour
     void UpdateLiveHUDStats()
     {
         if (dashboardStatsTMP == null) return;
-        int net0 = CalculatePlayerNetWorth(0);
-        string monopolySummary = GetMonopolyProgressSummary(0);
+        string monopolySummary = GetMonopolyProgressSummary(CurrentTurnPlayer);
         string cycleBadge = "";
         switch (currentMarketCycle)
         {
@@ -2418,35 +2481,20 @@ public partial class TycoonBoardManager : MonoBehaviour
             default: cycleBadge = "MARKET: STANDARD"; break;
         }
 
-        string p0Name = (!isPassAndPlayMode) ? "YOU" : GetPlayerName(0).ToUpper();
-        string statsLine = $"{p0Name}: ${playerCash[0]} (NET: ${net0})";
-        for (int p = 1; p < activePlayerCount; p++)
-        {
-            string shortName = GetPlayerName(p).ToUpper();
-            int net = CalculatePlayerNetWorth(p);
-            if (isBankrupt[p]) statsLine += $" | {shortName}: [OUT]";
-            else statsLine += $" | {shortName}: ${playerCash[p]} (NET: ${net})";
-        }
-        statsLine += $" | POT: ${freeParkingJackpot} | {cycleBadge}\n{monopolySummary}";
-        dashboardStatsTMP.text = statsLine;
+        dashboardStatsTMP.text = $"ROUND {totalTurnsCompleted + 1}  |  POT: ${freeParkingJackpot}  |  {cycleBadge}\n{monopolySummary}";
     }
 
     public void RefreshDashboard(string eventHeadline, string promptLine)
     {
         if (dashboardTitleTMP != null)
         {
-            string p0Name = (!isPassAndPlayMode) ? "YOU" : GetPlayerName(0).ToUpper();
-            string titleStr = $"{p0Name}: ${playerCash[0]}";
-            for (int p = 1; p < activePlayerCount; p++)
-            {
-                string shortName = GetPlayerName(p).ToUpper();
-                titleStr += isBankrupt[p] ? $" | {shortName}: [OUT]" : $" | {shortName}: ${playerCash[p]}";
-            }
-            titleStr += $" | JACKPOT: ${freeParkingJackpot}";
-            dashboardTitleTMP.text = titleStr;
+            string activeName = (!isPassAndPlayMode && CurrentTurnPlayer == 0) ? "YOU" : GetPlayerName(CurrentTurnPlayer).ToUpper();
+            int currentCash = (playerCash != null && CurrentTurnPlayer >= 0 && CurrentTurnPlayer < playerCash.Length) ? playerCash[CurrentTurnPlayer] : 0;
+            dashboardTitleTMP.text = $"TURN: {activeName} (CASH: ${currentCash} | NET: ${CalculatePlayerNetWorth(CurrentTurnPlayer)})";
         }
         if (dashboardBodyTMP != null) dashboardBodyTMP.text = eventHeadline;
         if (dashboardPromptTMP != null) dashboardPromptTMP.text = promptLine;
+        isHudDirty = true;
         UpdateLiveHUDStats();
     }
 
@@ -2576,8 +2624,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             streetlightPrefab = FindPrefabByNameOrFilter(artFolders, "Spotlight_01", "traffic_light_001");
 
         // 7. Interactive Props & Minigame Prefabs (Header 8)
-        if (tradeContractPrefab == null)
-            tradeContractPrefab = FindPrefabByNameOrFilter(artFolders, "TradeContract", "Document", "Paper", "Letter", "Book_01", "Contract");
+        tradeContractPrefab = null; // Clean procedural parchment scroll with zero obstruction
         if (waxSealStampPrefab == null)
             waxSealStampPrefab = FindPrefabByNameOrFilter(artFolders, "WaxSeal", "Stamp", "Seal");
         if (auctionGavelPrefab == null)

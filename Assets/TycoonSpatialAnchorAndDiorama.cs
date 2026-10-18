@@ -72,6 +72,16 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
 
     void Update()
     {
+        // 0. Hide Pass & Play badge during Start Menu to prevent tabletop clutter
+        if (passAndPlayBadgeGO != null && boardManager != null)
+        {
+            bool isStartMenu = (boardManager.CurrentState == TycoonBoardManager.TurnState.StartMenu);
+            if (passAndPlayBadgeGO.activeSelf == isStartMenu)
+            {
+                passAndPlayBadgeGO.SetActive(!isStartMenu);
+            }
+        }
+
         // 1. Keyboard Tab shortcut to toggle Pass & Play mode
         if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
         {

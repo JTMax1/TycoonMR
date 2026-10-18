@@ -330,18 +330,18 @@ public class TycoonColocationAndPolish : MonoBehaviour
 
         Vector3[] seatOffsets = new Vector3[]
         {
-            new Vector3(0f, yPos, -offset),  // Seat 0: South (YOU)
-            new Vector3(0f, yPos, offset),   // Seat 1: North (ALPHA)
-            new Vector3(-offset, yPos, 0f),  // Seat 2: West (BETA)
-            new Vector3(offset, yPos, 0f)    // Seat 3: East (GAMMA)
+            new Vector3(-0.62f, 0.018f, -0.54f), // Seat 0: South-West (YOU) beside briefcase
+            new Vector3(0f, yPos, offset),        // Seat 1: North (ALPHA)
+            new Vector3(-offset, yPos, 0f),       // Seat 2: West (BETA)
+            new Vector3(offset, yPos, 0f)         // Seat 3: East (GAMMA)
         };
 
         Quaternion[] seatRotations = new Quaternion[]
         {
-            Quaternion.Euler(22f, 0f, 0f),    // Facing South spectator
-            Quaternion.Euler(22f, 180f, 0f),  // Facing North spectator
-            Quaternion.Euler(22f, -90f, 0f),  // Facing West spectator
-            Quaternion.Euler(22f, 90f, 0f)    // Facing East spectator
+            Quaternion.Euler(22f, 15f, 0f),     // Facing South-West spectator
+            Quaternion.Euler(22f, 180f, 0f),    // Facing North spectator
+            Quaternion.Euler(22f, -90f, 0f),    // Facing West spectator
+            Quaternion.Euler(22f, 90f, 0f)      // Facing East spectator
         };
 
         for (int p = 0; p < 4; p++)

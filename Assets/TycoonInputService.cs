@@ -17,6 +17,7 @@ public partial class TycoonBoardManager
 #pragma warning disable CS0618
         scenePokeInteractors = UnityEngine.Object.FindObjectsByType<PokeInteractor>(FindObjectsSortMode.None);
         sceneOVRHands = UnityEngine.Object.FindObjectsByType<OVRHand>(FindObjectsSortMode.None);
+        sceneSkeletons = UnityEngine.Object.FindObjectsByType<OVRSkeleton>(FindObjectsSortMode.None);
 #pragma warning restore CS0618
     }
 
@@ -93,6 +94,51 @@ public partial class TycoonBoardManager
             }
         }
 
+        // 1b. Read Exact Physical Index Fingertips from OVRSkeleton (Bones)
+        if (sceneSkeletons == null || sceneSkeletons.Length == 0)
+        {
+#pragma warning disable CS0618
+            sceneSkeletons = UnityEngine.Object.FindObjectsByType<OVRSkeleton>(FindObjectsSortMode.None);
+#pragma warning restore CS0618
+        }
+
+        if (sceneSkeletons != null)
+        {
+            foreach (var skel in sceneSkeletons)
+            {
+                if (skel == null || !skel.IsInitialized) continue;
+                int handedness = DetermineHierarchyHandedness(skel.transform);
+                if (handedness == 0)
+                {
+                    if (skel.GetSkeletonType() == OVRSkeleton.SkeletonType.HandLeft) handedness = -1;
+                    else if (skel.GetSkeletonType() == OVRSkeleton.SkeletonType.HandRight) handedness = 1;
+                }
+
+                if (skel.Bones != null)
+                {
+                    for (int bIdx = 0; bIdx < skel.Bones.Count; bIdx++)
+                    {
+                        var bone = skel.Bones[bIdx];
+                        if (bone != null && bone.Id == OVRSkeleton.BoneId.Hand_IndexTip && bone.Transform != null)
+                        {
+                            Vector3 tipWorld = bone.Transform.position;
+                            if (handedness == -1)
+                            {
+                                leftHandWorldPos = tipWorld;
+                                isLeftHandTracked = true;
+                            }
+                            else if (handedness == 1)
+                            {
+                                rightHandWorldPos = tipWorld;
+                                isRightHandTracked = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Read Pinch Gestures & Hand Positions from Meta's OVRHand
         if (sceneOVRHands == null || sceneOVRHands.Length == 0)
         {
@@ -112,7 +158,8 @@ public partial class TycoonBoardManager
                 bool grabbing = hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
                                 hand.GetFingerPinchStrength(OVRHand.HandFinger.Middle) > 0.55f;
 
-                Vector3 ptrPos = hand.PointerPose != null ? hand.PointerPose.position : hand.transform.position;
+                Vector3 forwardOffset = hand.PointerPose != null ? hand.PointerPose.forward * 0.08f : hand.transform.forward * 0.08f;
+                Vector3 ptrPos = (hand.PointerPose != null ? hand.PointerPose.position : hand.transform.position) + forwardOffset;
                 int handedness = DetermineHierarchyHandedness(hand.transform);
                 if (handedness == 0)
                 {
@@ -513,7 +560,7 @@ public partial class TycoonBoardManager
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
         int closestIdx = -1;
-        float minContactDist = 0.024f;
+        float minContactDist = 0.048f;
 
         for (int i = 0; i < buttonTransforms.Length; i++)
         {
@@ -548,7 +595,7 @@ public partial class TycoonBoardManager
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
         int closestTile = -1;
-        float minContactDist = 0.026f;
+        float minContactDist = 0.045f;
 
         for (int i = 0; i < 40; i++)
         {
@@ -585,8 +632,8 @@ public partial class TycoonBoardManager
         Collider col = mortgageButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
 
         if (rightPoked || leftPoked)
         {
@@ -606,8 +653,8 @@ public partial class TycoonBoardManager
         Collider col = upgradeCardButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
 
         if (rightPoked || leftPoked)
         {
@@ -627,8 +674,8 @@ public partial class TycoonBoardManager
         Collider col = offerDealButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
 
         if (rightPoked || leftPoked)
         {
@@ -645,7 +692,7 @@ public partial class TycoonBoardManager
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
         int closestIdx = -1;
-        float minContactDist = 0.028f;
+        float minContactDist = 0.048f;
 
         for (int i = 0; i < startMenuButtonTransforms.Length; i++)
         {
