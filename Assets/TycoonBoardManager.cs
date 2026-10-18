@@ -6,6 +6,7 @@ using UnityEngine.InputSystem;
 using TMPro;
 using Oculus.Interaction;
 using Oculus.Interaction.HandGrab;
+using Oculus.Interaction.Surfaces;
 
 [RequireComponent(typeof(AudioSource))]
 public partial class TycoonBoardManager : MonoBehaviour
@@ -429,13 +430,24 @@ public partial class TycoonBoardManager : MonoBehaviour
     private Transform activeHandGrabTransform;
     private Vector3 leftHandWorldPos = new Vector3(0f, -100f, 0f);
     private Vector3 rightHandWorldPos = new Vector3(0f, -100f, 0f);
+    private Vector3 leftIndexTipWorldPos = new Vector3(0f, -100f, 0f);
+    private Vector3 rightIndexTipWorldPos = new Vector3(0f, -100f, 0f);
     private bool isLeftHandTracked = false;
     private bool isRightHandTracked = false;
+    private bool isLeftIndexTracked = false;
+    private bool isRightIndexTracked = false;
+    public Vector3 RightIndexTipWorldPos => rightIndexTipWorldPos;
+    public Vector3 LeftIndexTipWorldPos => leftIndexTipWorldPos;
+    public bool IsRightIndexTracked => isRightIndexTracked;
+    public bool IsLeftIndexTracked => isLeftIndexTracked;
     private bool isLeftHandGrabbing = false;
     private bool isRightHandGrabbing = false;
     private bool spacePressed = false;
     private bool buyPressed = false;
     private bool passPressed = false;
+    private bool upgradePressed = false;
+    private bool takeoverPressed = false;
+    private bool vrViewPressed = false;
     private bool isHudDirty = true;
     public void MarkHudDirty() => isHudDirty = true;
 
@@ -655,6 +667,89 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    public void AttachNativeBuildingBlockPoke(GameObject targetObj, System.Action onPokeSelect, Vector3 surfaceFacing)
+    {
+        if (targetObj == null) return;
+
+        Collider col = targetObj.GetComponent<Collider>();
+        if (col == null)
+        {
+            BoxCollider bc = targetObj.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            col = bc;
+        }
+
+        PokeInteractable pokeInteractable = null;
+
+        if (buildingBlockPokeTemplate != null)
+        {
+            PokeInteractable templatePI = buildingBlockPokeTemplate.GetComponentInChildren<PokeInteractable>(true);
+            if (templatePI != null)
+            {
+                Transform existingChild = targetObj.transform.Find("[BuildingBlock] PokeInteractable");
+                if (existingChild == null)
+                {
+                    GameObject clonedChild = Instantiate(templatePI.gameObject, targetObj.transform);
+                    clonedChild.name = "[BuildingBlock] PokeInteractable";
+                    clonedChild.transform.localPosition = Vector3.zero;
+
+                    Quaternion surfaceRot = Quaternion.identity;
+                    if (surfaceFacing == Vector3.up) surfaceRot = Quaternion.Euler(90f, 0f, 0f);
+                    else if (surfaceFacing == Vector3.down) surfaceRot = Quaternion.Euler(-90f, 0f, 0f);
+                    else if (surfaceFacing != Vector3.zero) surfaceRot = Quaternion.LookRotation(-surfaceFacing, Vector3.up);
+
+                    clonedChild.transform.localRotation = surfaceRot;
+                    clonedChild.transform.localScale = Vector3.one;
+
+                    foreach (Renderer r in clonedChild.GetComponentsInChildren<Renderer>(true))
+                    {
+                        r.enabled = false;
+                    }
+
+                    clonedChild.SetActive(true);
+                    pokeInteractable = clonedChild.GetComponent<PokeInteractable>();
+                }
+                else
+                {
+                    pokeInteractable = existingChild.GetComponent<PokeInteractable>();
+                }
+            }
+        }
+
+        if (pokeInteractable == null)
+        {
+            pokeInteractable = targetObj.GetComponentInChildren<PokeInteractable>();
+        }
+
+        if (pokeInteractable == null)
+        {
+            PlaneSurface plane = targetObj.GetComponent<PlaneSurface>();
+            if (plane == null) plane = targetObj.AddComponent<PlaneSurface>();
+
+            BoundsClipper box = targetObj.GetComponent<BoundsClipper>();
+            if (box == null) box = targetObj.AddComponent<BoundsClipper>();
+
+            ClippedPlaneSurface clipped = targetObj.GetComponent<ClippedPlaneSurface>();
+            if (clipped == null) clipped = targetObj.AddComponent<ClippedPlaneSurface>();
+            clipped.InjectPlaneSurface(plane);
+            clipped.InjectClippers(new List<IBoundsClipper> { box });
+
+            pokeInteractable = targetObj.AddComponent<PokeInteractable>();
+            pokeInteractable.InjectSurfacePatch(clipped);
+        }
+
+        if (pokeInteractable != null && onPokeSelect != null)
+        {
+            pokeInteractable.WhenStateChanged += (args) =>
+            {
+                if (args.NewState == InteractableState.Select)
+                {
+                    onPokeSelect();
+                }
+            };
+        }
+    }
+
     void EnforceUnderlayPassthrough()
     {
 #pragma warning disable CS0618
@@ -865,13 +960,13 @@ public partial class TycoonBoardManager : MonoBehaviour
         AnimateRivalMogulAvatar();
         AnimateFloatingDeedCrystal();
 
-        spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-        buyPressed = Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame;
-        passPressed = Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame;
-        bool upgradePressed = Keyboard.current != null && Keyboard.current.uKey.wasPressedThisFrame;
-        bool takeoverPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
+        spacePressed = spacePressed || (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame);
+        buyPressed = buyPressed || (Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame);
+        passPressed = passPressed || (Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame);
+        upgradePressed = upgradePressed || (Keyboard.current != null && Keyboard.current.uKey.wasPressedThisFrame);
+        takeoverPressed = takeoverPressed || (Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame);
         bool moodPressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
-        bool vrViewPressed = Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame;
+        vrViewPressed = vrViewPressed || (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame);
         bool recenterPressed = Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
         bool shrinkPressed = Keyboard.current != null && Keyboard.current.minusKey.wasPressedThisFrame;
         bool growPressed = Keyboard.current != null && Keyboard.current.equalsKey.wasPressedThisFrame;
@@ -908,48 +1003,12 @@ public partial class TycoonBoardManager : MonoBehaviour
             bool diffKey = Keyboard.current != null && Keyboard.current.dKey.wasPressedThisFrame;
             bool cashKey = Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
 
-            if (startBtn == 0 || modeKey)
-            {
-                if (currentMatchMode == MatchMultiplayerMode.VsAIMoguls) currentMatchMode = MatchMultiplayerMode.PassAndPlay;
-                else if (currentMatchMode == MatchMultiplayerMode.PassAndPlay) currentMatchMode = MatchMultiplayerMode.LocalWiFiColocation;
-                else if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation) currentMatchMode = MatchMultiplayerMode.OnlineMultiplayer;
-                else currentMatchMode = MatchMultiplayerMode.VsAIMoguls;
-
-                UpdateStartMenuUI();
-                PlaySFX(tokenMoveSound, procStepClip, 1.25f);
-                PlayHaptic(0.2f, 0.1f);
-            }
-            else if (startBtn == 1 || rKey)
-            {
-                activePlayerCount++;
-                if (activePlayerCount > 4) activePlayerCount = 2;
-                UpdateActivePlayerVisibilities();
-                UpdateStartMenuUI();
-                PlaySFX(tokenMoveSound, procStepClip, 1.2f);
-                PlayHaptic(0.2f, 0.1f);
-            }
-            else if (startBtn == 2 || diffKey)
-            {
-                if (aiDifficulty == AIDifficulty.Tycoon) aiDifficulty = AIDifficulty.Billionaire;
-                else if (aiDifficulty == AIDifficulty.Billionaire) aiDifficulty = AIDifficulty.Casual;
-                else aiDifficulty = AIDifficulty.Tycoon;
-                UpdateStartMenuUI();
-                PlaySFX(tokenMoveSound, procStepClip, 1.3f);
-                PlayHaptic(0.2f, 0.1f);
-            }
-            else if (startBtn == 3 || cashKey)
-            {
-                if (startingCashConfig == 1500) startingCashConfig = 2500;
-                else if (startingCashConfig == 2500) startingCashConfig = 1000;
-                else startingCashConfig = 1500;
-                UpdateStartMenuUI();
-                PlaySFX(procCashClip, procCashClip, 1.1f);
-                PlayHaptic(0.2f, 0.1f);
-            }
-            else if (startBtn == 4 || spaceOrEnter)
-            {
-                LaunchEmpireMatch();
-            }
+            if (startBtn >= 0) TriggerStartMenuButtonAction(startBtn);
+            else if (modeKey) TriggerStartMenuButtonAction(0);
+            else if (rKey) TriggerStartMenuButtonAction(1);
+            else if (diffKey) TriggerStartMenuButtonAction(2);
+            else if (cashKey) TriggerStartMenuButtonAction(3);
+            else if (spaceOrEnter) TriggerStartMenuButtonAction(4);
 
             return;
         }
@@ -994,29 +1053,9 @@ public partial class TycoonBoardManager : MonoBehaviour
         if (isTwoHandManipulating) return;
 
         int touchedButton = CheckPhysicalButtonTouch();
-        if (touchedButton == 0) spacePressed = true;
-        else if (touchedButton == 1) buyPressed = true;
-        else if (touchedButton == 2) passPressed = true;
-        else if (touchedButton == 3) upgradePressed = true;
-        else if (touchedButton == 4) takeoverPressed = true;
-        else if (touchedButton == 5) vrViewPressed = true;
-        else if (touchedButton == 6) AdjustBoardScale(-0.12f);
-        else if (touchedButton == 7) AdjustBoardScale(0.12f);
-        else if (touchedButton == 8) RecenterBoardInFrontOfPlayer();
-        else if (touchedButton == 9)
+        if (touchedButton >= 0)
         {
-            if (Time.time - newGameArmTime < 4.0f)
-            {
-                newGameArmTime = 0f;
-                ResetMatch();
-            }
-            else
-            {
-                newGameArmTime = Time.time;
-                RefreshDashboard("CONFIRM RESET", "<color=#FF4444>POKE [NEW GAME] AGAIN TO CONFIRM RESET (4s)</color>");
-                PlayHaptic(0.4f, 0.15f);
-                PlaySFX(diceRollSound, procDiceClip, 1.1f);
-            }
+            TriggerTableButtonAction(touchedButton);
         }
 
         bool mortgagePoked = CheckMortgageButtonPoke();
@@ -1170,6 +1209,13 @@ public partial class TycoonBoardManager : MonoBehaviour
             UpdateLiveHUDStats();
             UpdateContextualActionButtons();
         }
+
+        spacePressed = false;
+        buyPressed = false;
+        passPressed = false;
+        upgradePressed = false;
+        takeoverPressed = false;
+        vrViewPressed = false;
     }
 
     void CreateFloatingVRControls()
@@ -1449,6 +1495,11 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         btn.SetActive(false);
         mortgageBtnCanvasGO.SetActive(false);
+        AttachNativeBuildingBlockPoke(btn, () =>
+        {
+            if (selectedTileIndex >= 0 && selectedTileIndex < 40) ExecuteMortgageOrUnmortgage(board[selectedTileIndex]);
+            else if (board[playerPos[0]].owner == 0) ExecuteMortgageOrUnmortgage(board[playerPos[0]]);
+        }, -Vector3.forward);
 
         // 2. Targeted Upgrade Button [+ BUILD ($Cost)] (Right bottom lip of deed card)
         GameObject btnUp = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1485,6 +1536,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         btnUp.SetActive(false);
         upgradeBtnCanvasGO.SetActive(false);
         upgradeCardButtonTransform = btnUp.transform;
+        AttachNativeBuildingBlockPoke(btnUp, () => TryBuildChronologically(CurrentTurnPlayer), -Vector3.forward);
 
         // 3. Negotiated Trade Button [OFFER DEAL (D)] (for AI-owned tiles)
         GameObject btnDeal = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1521,6 +1573,19 @@ public partial class TycoonBoardManager : MonoBehaviour
         btnDeal.SetActive(false);
         offerDealBtnCanvasGO.SetActive(false);
         offerDealButtonTransform = btnDeal.transform;
+        AttachNativeBuildingBlockPoke(btnDeal, () =>
+        {
+            BoardTile target = (selectedTileIndex >= 0 && selectedTileIndex < 40) ? board[selectedTileIndex] : null;
+            if (target == null && board[playerPos[0]].owner == 1) target = board[playerPos[0]];
+            if (target != null && target.owner == 1)
+            {
+                ExecuteTradeDeal(target);
+            }
+            else
+            {
+                RefreshDashboard("NO AI PROPERTY SELECTED", "Poke an AI-owned tile on the board to propose a trade or buyout!");
+            }
+        }, -Vector3.forward);
 
         return btn.transform;
     }
@@ -1828,6 +1893,116 @@ public partial class TycoonBoardManager : MonoBehaviour
         return tmp;
     }
 
+    public void TriggerTableButtonAction(int buttonIndex)
+    {
+        if (buttonIndex < 0 || buttonIndex >= buttonTransforms.Length) return;
+        if (buttonTransforms[buttonIndex] == null || !buttonTransforms[buttonIndex].gameObject.activeInHierarchy) return;
+        if (Time.time < lastButtonTouchTime) return;
+        lastButtonTouchTime = Time.time + 0.35f;
+
+        StartCoroutine(AnimateButtonPress(buttonTransforms[buttonIndex]));
+
+        switch (buttonIndex)
+        {
+            case 0:
+                spacePressed = true;
+                break;
+            case 1:
+                buyPressed = true;
+                break;
+            case 2:
+                passPressed = true;
+                break;
+            case 3:
+                upgradePressed = true;
+                break;
+            case 4:
+                takeoverPressed = true;
+                break;
+            case 5:
+                vrViewPressed = true;
+                break;
+            case 6:
+                AdjustBoardScale(-0.12f);
+                break;
+            case 7:
+                AdjustBoardScale(0.12f);
+                break;
+            case 8:
+                RecenterBoardInFrontOfPlayer();
+                break;
+            case 9:
+                if (Time.time - newGameArmTime < 4.0f)
+                {
+                    newGameArmTime = 0f;
+                    ResetMatch();
+                }
+                else
+                {
+                    newGameArmTime = Time.time;
+                    RefreshDashboard("CONFIRM RESET", "<color=#FF4444>POKE [NEW GAME] AGAIN TO CONFIRM RESET (4s)</color>");
+                    PlayHaptic(0.4f, 0.15f);
+                    PlaySFX(diceRollSound, procDiceClip, 1.1f);
+                }
+                break;
+        }
+    }
+
+    public void TriggerStartMenuButtonAction(int startBtn)
+    {
+        if (currentState != TurnState.StartMenu) return;
+        if (Time.time < lastButtonTouchTime) return;
+        lastButtonTouchTime = Time.time + 0.35f;
+
+        if (startBtn >= 0 && startBtn < startMenuButtonTransforms.Length && startMenuButtonTransforms[startBtn] != null)
+        {
+            StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[startBtn]));
+        }
+
+        if (startBtn == 0)
+        {
+            if (currentMatchMode == MatchMultiplayerMode.VsAIMoguls) currentMatchMode = MatchMultiplayerMode.PassAndPlay;
+            else if (currentMatchMode == MatchMultiplayerMode.PassAndPlay) currentMatchMode = MatchMultiplayerMode.LocalWiFiColocation;
+            else if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation) currentMatchMode = MatchMultiplayerMode.OnlineMultiplayer;
+            else currentMatchMode = MatchMultiplayerMode.VsAIMoguls;
+
+            UpdateStartMenuUI();
+            PlaySFX(tokenMoveSound, procStepClip, 1.25f);
+            PlayHaptic(0.2f, 0.1f);
+        }
+        else if (startBtn == 1)
+        {
+            activePlayerCount++;
+            if (activePlayerCount > 4) activePlayerCount = 2;
+            UpdateActivePlayerVisibilities();
+            UpdateStartMenuUI();
+            PlaySFX(tokenMoveSound, procStepClip, 1.2f);
+            PlayHaptic(0.2f, 0.1f);
+        }
+        else if (startBtn == 2)
+        {
+            if (aiDifficulty == AIDifficulty.Tycoon) aiDifficulty = AIDifficulty.Billionaire;
+            else if (aiDifficulty == AIDifficulty.Billionaire) aiDifficulty = AIDifficulty.Casual;
+            else aiDifficulty = AIDifficulty.Tycoon;
+            UpdateStartMenuUI();
+            PlaySFX(tokenMoveSound, procStepClip, 1.3f);
+            PlayHaptic(0.2f, 0.1f);
+        }
+        else if (startBtn == 3)
+        {
+            if (startingCashConfig == 1500) startingCashConfig = 2500;
+            else if (startingCashConfig == 2500) startingCashConfig = 1000;
+            else startingCashConfig = 1500;
+            UpdateStartMenuUI();
+            PlaySFX(procCashClip, procCashClip, 1.1f);
+            PlayHaptic(0.2f, 0.1f);
+        }
+        else if (startBtn == 4)
+        {
+            LaunchEmpireMatch();
+        }
+    }
+
     void Create3DTouchButtonsOnTable()
     {
         string[] labels = { "ROLL DICE", "BUY DEED", "PASS TURN", "BUILD (U)", "TAKEOVER", "VR VIEW" };
@@ -1846,12 +2021,14 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         for (int i = 0; i < 6; i++)
         {
+            int btnIdx = i;
             buttonTransforms[i] = CreateSingle3DButton(
                 labels[i],
                 colors[i],
                 new Vector3(startX + i * spacing, 0.035f, frontZ),
                 new Vector3(0.15f, 0.032f, 0.072f)
             );
+            AttachNativeBuildingBlockPoke(buttonTransforms[i].gameObject, () => TriggerTableButtonAction(btnIdx), Vector3.up);
         }
 
         string[] utilLabels = { "- SHRINK", "+ GROW", "RECENTER", "NEW GAME" };
@@ -1867,12 +2044,14 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         for (int j = 0; j < 4; j++)
         {
+            int btnIdx = 6 + j;
             buttonTransforms[6 + j] = CreateSingle3DButton(
                 utilLabels[j],
                 utilColors[j],
                 new Vector3(startUtilX + j * utilSpacing, 0.020f, frontZ - 0.075f),
                 new Vector3(0.15f, 0.025f, 0.055f)
             );
+            AttachNativeBuildingBlockPoke(buttonTransforms[6 + j].gameObject, () => TriggerTableButtonAction(btnIdx), Vector3.up);
         }
     }
 
@@ -1983,7 +2162,9 @@ public partial class TycoonBoardManager : MonoBehaviour
             BoxCollider col = btnCube.GetComponent<BoxCollider>();
             if (col != null) col.isTrigger = true;
             btnCube.GetComponent<Renderer>().material = CreateColoredMaterial(btnColors[i], 0.90f);
+            int startIdx = i;
             startMenuButtonTransforms[i] = btnCube.transform;
+            AttachNativeBuildingBlockPoke(btnCube, () => TriggerStartMenuButtonAction(startIdx), -Vector3.forward);
 
             GameObject btnCanvasGO = new GameObject($"StartMenu_Btn_Canvas_{i}");
             btnCanvasGO.transform.SetParent(startMenuHolder.transform, false);

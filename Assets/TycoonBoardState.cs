@@ -210,7 +210,7 @@ public partial class TycoonBoardManager
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
         StripRoguePhysicsFromImportedPrefab(instance);
-        NormalizePrefabSize(instance, 0.065f);
+        NormalizePrefabSize(instance, 0.065f, snapBottomToOrigin: true);
     }
 
     Color GetOfficialColor(BoardTile tile)
@@ -273,15 +273,15 @@ public partial class TycoonBoardManager
 
         GameObject chestRoot = new GameObject("Free_Parking_Jackpot_Chest");
         chestRoot.transform.SetParent(courtyardRoot.transform, false);
-        chestRoot.transform.localPosition = new Vector3(-0.13f, 0.028f, 0.08f);
+        chestRoot.transform.localPosition = new Vector3(-0.13f, 0.0275f, 0.08f);
         chestRoot.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
 
         if (jackpotChestPrefab != null)
         {
             GameObject chestModel = Instantiate(jackpotChestPrefab, chestRoot.transform, false);
             StripRoguePhysicsFromImportedPrefab(chestModel);
-            NormalizePrefabSize(chestModel, 0.055f, true);
             chestModel.transform.localPosition = Vector3.zero;
+            NormalizePrefabSize(chestModel, 0.055f, true);
         }
         else
         {
@@ -332,10 +332,14 @@ public partial class TycoonBoardManager
 
         if (parkCenterpiecePrefab != null && parkCenterpiecePrefab.GetComponent<OVRCameraRig>() == null)
         {
-            GameObject cp = Instantiate(parkCenterpiecePrefab, courtyardRoot.transform);
+            GameObject cpHolder = new GameObject("Central_Park_Fountain");
+            cpHolder.transform.SetParent(courtyardRoot.transform, false);
+            cpHolder.transform.localPosition = new Vector3(0f, 0.0275f, 0.12f);
+
+            GameObject cp = Instantiate(parkCenterpiecePrefab, cpHolder.transform);
             StripRoguePhysicsFromImportedPrefab(cp);
-            cp.transform.localPosition = new Vector3(0f, 0.03f, 0.14f);
-            NormalizePrefabSize(cp, 0.085f);
+            cp.transform.localPosition = Vector3.zero;
+            NormalizePrefabSize(cp, 0.085f, true);
         }
 
         GameObject auraRing = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -350,13 +354,13 @@ public partial class TycoonBoardManager
 
         Vector3[] treeSpots = new Vector3[]
         {
-            new Vector3(-0.22f, 0.028f, -0.22f),
-            new Vector3( 0.22f, 0.028f, -0.22f),
-            new Vector3( 0.22f, 0.028f,  0.22f),
-            new Vector3(-0.22f, 0.028f,  0.00f),
-            new Vector3( 0.22f, 0.028f,  0.00f),
-            new Vector3( 0.00f, 0.028f, -0.22f),
-            new Vector3( 0.00f, 0.028f,  0.22f)
+            new Vector3(-0.22f, 0.0275f, -0.22f),
+            new Vector3( 0.22f, 0.0275f, -0.22f),
+            new Vector3( 0.22f, 0.0275f,  0.22f),
+            new Vector3(-0.22f, 0.0275f,  0.00f),
+            new Vector3( 0.22f, 0.0275f,  0.00f),
+            new Vector3( 0.00f, 0.0275f, -0.22f),
+            new Vector3( 0.00f, 0.0275f,  0.22f)
         };
 
         for (int i = 0; i < treeSpots.Length; i++)
@@ -366,10 +370,10 @@ public partial class TycoonBoardManager
 
         Vector3[] lampSpots = new Vector3[]
         {
-            new Vector3(-0.27f, 0.028f, -0.27f),
-            new Vector3( 0.27f, 0.028f, -0.27f),
-            new Vector3(-0.27f, 0.028f,  0.27f),
-            new Vector3( 0.27f, 0.028f,  0.27f)
+            new Vector3(-0.27f, 0.0275f, -0.27f),
+            new Vector3( 0.27f, 0.0275f, -0.27f),
+            new Vector3(-0.27f, 0.0275f,  0.27f),
+            new Vector3( 0.27f, 0.0275f,  0.27f)
         };
 
         for (int i = 0; i < lampSpots.Length; i++)
@@ -445,7 +449,7 @@ public partial class TycoonBoardManager
             GameObject tree = Instantiate(parkTreePrefab, holder.transform);
             StripRoguePhysicsFromImportedPrefab(tree);
             tree.transform.localPosition = Vector3.zero;
-            NormalizePrefabSize(tree, 0.065f);
+            NormalizePrefabSize(tree, 0.065f, snapBottomToOrigin: true);
             return;
         }
 
@@ -475,7 +479,7 @@ public partial class TycoonBoardManager
             GameObject lamp = Instantiate(streetlightPrefab, holder.transform);
             StripRoguePhysicsFromImportedPrefab(lamp);
             lamp.transform.localPosition = Vector3.zero;
-            NormalizePrefabSize(lamp, 0.06f);
+            NormalizePrefabSize(lamp, 0.06f, snapBottomToOrigin: true);
         }
         else
         {
@@ -948,28 +952,85 @@ public partial class TycoonBoardManager
         }
     }
 
+    private Matrix4x4 GetMatrixRelativeToRoot(Transform child, Transform root)
+    {
+        Matrix4x4 mat = Matrix4x4.identity;
+        Transform curr = child;
+        while (curr != null && curr != root)
+        {
+            Matrix4x4 local = Matrix4x4.TRS(curr.localPosition, curr.localRotation, curr.localScale);
+            mat = local * mat;
+            curr = curr.parent;
+        }
+        return mat;
+    }
+
     public void NormalizePrefabSize(GameObject obj, float targetMaxSize, bool snapBottomToOrigin = true)
     {
         if (obj == null) return;
-        Renderer[] renderers = obj.GetComponentsInChildren<Renderer>(true);
-        if (renderers.Length == 0) return;
+        
+        MeshFilter[] mfs = obj.GetComponentsInChildren<MeshFilter>(true);
+        SkinnedMeshRenderer[] smrs = obj.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        if (mfs.Length == 0 && smrs.Length == 0) return;
 
-        Bounds b = renderers[0].bounds;
-        for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+        Bounds combinedLocalBounds = new Bounds();
+        bool first = true;
 
-        float maxDim = Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z));
-        if (maxDim > 0.0001f)
+        for (int i = 0; i < mfs.Length; i++)
         {
-            float scaleRatio = (targetMaxSize * transform.lossyScale.x) / maxDim;
-            obj.transform.localScale *= scaleRatio;
+            if (mfs[i] == null || mfs[i].sharedMesh == null) continue;
+            Bounds mb = mfs[i].sharedMesh.bounds;
+            Matrix4x4 localMat = GetMatrixRelativeToRoot(mfs[i].transform, obj.transform);
+            Vector3 c = mb.center;
+            Vector3 e = mb.extents;
+            for (int x = -1; x <= 1; x += 2)
+            {
+                for (int y = -1; y <= 1; y += 2)
+                {
+                    for (int z = -1; z <= 1; z += 2)
+                    {
+                        Vector3 pt = localMat.MultiplyPoint3x4(c + new Vector3(e.x * x, e.y * y, e.z * z));
+                        if (first) { combinedLocalBounds = new Bounds(pt, Vector3.zero); first = false; }
+                        else combinedLocalBounds.Encapsulate(pt);
+                    }
+                }
+            }
         }
 
-        if (snapBottomToOrigin)
+        for (int i = 0; i < smrs.Length; i++)
         {
-            b = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
-            float bottomOffset = obj.transform.position.y - b.min.y;
-            obj.transform.position += Vector3.up * bottomOffset;
+            if (smrs[i] == null || smrs[i].sharedMesh == null) continue;
+            Bounds mb = smrs[i].sharedMesh.bounds;
+            Matrix4x4 localMat = GetMatrixRelativeToRoot(smrs[i].transform, obj.transform);
+            Vector3 c = mb.center;
+            Vector3 e = mb.extents;
+            for (int x = -1; x <= 1; x += 2)
+            {
+                for (int y = -1; y <= 1; y += 2)
+                {
+                    for (int z = -1; z <= 1; z += 2)
+                    {
+                        Vector3 pt = localMat.MultiplyPoint3x4(c + new Vector3(e.x * x, e.y * y, e.z * z));
+                        if (first) { combinedLocalBounds = new Bounds(pt, Vector3.zero); first = false; }
+                        else combinedLocalBounds.Encapsulate(pt);
+                    }
+                }
+            }
+        }
+
+        if (first) return;
+
+        float maxDim = Mathf.Max(combinedLocalBounds.size.x, Mathf.Max(combinedLocalBounds.size.y, combinedLocalBounds.size.z));
+        if (maxDim > 0.0001f)
+        {
+            float scale = targetMaxSize / maxDim;
+            obj.transform.localScale = Vector3.one * scale;
+
+            if (snapBottomToOrigin)
+            {
+                float bottomInLocal = combinedLocalBounds.min.y * scale;
+                obj.transform.localPosition = new Vector3(obj.transform.localPosition.x, -bottomInLocal, obj.transform.localPosition.z);
+            }
         }
     }
 }

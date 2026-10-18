@@ -43,10 +43,14 @@ public partial class TycoonBoardManager
         isLeftPinching = false;
         isLeftHandTracked = false;
         isRightHandTracked = false;
+        isLeftIndexTracked = false;
+        isRightIndexTracked = false;
         isLeftHandGrabbing = false;
         isRightHandGrabbing = false;
         leftHandWorldPos = new Vector3(0f, -100f, 0f);
         rightHandWorldPos = new Vector3(0f, -100f, 0f);
+        leftIndexTipWorldPos = new Vector3(0f, -100f, 0f);
+        rightIndexTipWorldPos = new Vector3(0f, -100f, 0f);
 
         // 1. Read Index Fingertip Poke Positions directly from Meta's PokeInteractor (Interactions Rig)!
         if (scenePokeInteractors == null || scenePokeInteractors.Length == 0)
@@ -70,12 +74,16 @@ public partial class TycoonBoardManager
                 if (handedness == -1)
                 {
                     leftHandWorldPos = tipPos;
+                    leftIndexTipWorldPos = tipPos;
                     isLeftHandTracked = true;
+                    isLeftIndexTracked = true;
                 }
                 else if (handedness == 1)
                 {
                     rightHandWorldPos = tipPos;
+                    rightIndexTipWorldPos = tipPos;
                     isRightHandTracked = true;
+                    isRightIndexTracked = true;
                 }
                 else
                 {
@@ -83,12 +91,16 @@ public partial class TycoonBoardManager
                     if (camLocal.x < 0f)
                     {
                         leftHandWorldPos = tipPos;
+                        leftIndexTipWorldPos = tipPos;
                         isLeftHandTracked = true;
+                        isLeftIndexTracked = true;
                     }
                     else
                     {
                         rightHandWorldPos = tipPos;
+                        rightIndexTipWorldPos = tipPos;
                         isRightHandTracked = true;
+                        isRightIndexTracked = true;
                     }
                 }
             }
@@ -125,12 +137,16 @@ public partial class TycoonBoardManager
                             if (handedness == -1)
                             {
                                 leftHandWorldPos = tipWorld;
+                                leftIndexTipWorldPos = tipWorld;
                                 isLeftHandTracked = true;
+                                isLeftIndexTracked = true;
                             }
                             else if (handedness == 1)
                             {
                                 rightHandWorldPos = tipWorld;
+                                rightIndexTipWorldPos = tipWorld;
                                 isRightHandTracked = true;
+                                isRightIndexTracked = true;
                             }
                             break;
                         }
@@ -557,19 +573,23 @@ public partial class TycoonBoardManager
     int CheckPhysicalButtonTouch()
     {
         if (Time.time < lastButtonTouchTime) return -1;
-        if (!isRightHandTracked && !isLeftHandTracked) return -1;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return -1;
 
         int closestIdx = -1;
-        float minContactDist = 0.048f;
+        float minContactDist = 0.016f;
 
         for (int i = 0; i < buttonTransforms.Length; i++)
         {
-            if (buttonTransforms[i] == null) continue;
+            if (buttonTransforms[i] == null || !buttonTransforms[i].gameObject.activeInHierarchy) continue;
             Collider btnCol = buttonTransforms[i].GetComponent<Collider>();
             if (btnCol == null) continue;
 
-            float dRight = isRightHandTracked ? Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
-            float dLeft = isLeftHandTracked ? Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dRight = (isRightIndexTracked && rightIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(btnCol.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos)
+                : float.MaxValue;
+            float dLeft = (isLeftIndexTracked && leftIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(btnCol.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos)
+                : float.MaxValue;
             float dMin = Mathf.Min(dRight, dLeft);
 
             if (dMin < minContactDist)
@@ -581,7 +601,7 @@ public partial class TycoonBoardManager
 
         if (closestIdx >= 0)
         {
-            lastButtonTouchTime = Time.time + 0.40f;
+            lastButtonTouchTime = Time.time + 0.35f;
             StartCoroutine(AnimateButtonPress(buttonTransforms[closestIdx]));
             return closestIdx;
         }
@@ -592,19 +612,23 @@ public partial class TycoonBoardManager
     int CheckPhysicalTilePoke()
     {
         if (Time.time < lastTilePokeTime) return -1;
-        if (!isRightHandTracked && !isLeftHandTracked) return -1;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return -1;
 
         int closestTile = -1;
-        float minContactDist = 0.045f;
+        float minContactDist = 0.018f;
 
         for (int i = 0; i < 40; i++)
         {
-            if (board[i] == null || board[i].tileTransform == null) continue;
+            if (board[i] == null || board[i].tileTransform == null || !board[i].tileTransform.gameObject.activeInHierarchy) continue;
             Collider col = board[i].tileTransform.GetComponent<Collider>();
             if (col == null) continue;
 
-            float dRight = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
-            float dLeft = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dRight = (isRightIndexTracked && rightIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(col.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos)
+                : float.MaxValue;
+            float dLeft = (isLeftIndexTracked && leftIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(col.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos)
+                : float.MaxValue;
             float dMin = Mathf.Min(dRight, dLeft);
 
             if (dMin < minContactDist)
@@ -627,17 +651,17 @@ public partial class TycoonBoardManager
     {
         if (mortgageButtonTransform == null || !mortgageButtonTransform.gameObject.activeInHierarchy) return false;
         if (Time.time < lastButtonTouchTime) return false;
-        if (!isRightHandTracked && !isLeftHandTracked) return false;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return false;
 
         Collider col = mortgageButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
+        bool rightPoked = isRightIndexTracked && rightIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos) < 0.016f;
+        bool leftPoked = isLeftIndexTracked && leftIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos) < 0.016f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.45f;
+            lastButtonTouchTime = Time.time + 0.35f;
             StartCoroutine(AnimateButtonPress(mortgageButtonTransform));
             return true;
         }
@@ -648,17 +672,17 @@ public partial class TycoonBoardManager
     {
         if (upgradeCardButtonTransform == null || !upgradeCardButtonTransform.gameObject.activeInHierarchy) return false;
         if (Time.time < lastButtonTouchTime) return false;
-        if (!isRightHandTracked && !isLeftHandTracked) return false;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return false;
 
         Collider col = upgradeCardButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
+        bool rightPoked = isRightIndexTracked && rightIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos) < 0.016f;
+        bool leftPoked = isLeftIndexTracked && leftIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos) < 0.016f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.45f;
+            lastButtonTouchTime = Time.time + 0.35f;
             StartCoroutine(AnimateButtonPress(upgradeCardButtonTransform));
             return true;
         }
@@ -669,17 +693,17 @@ public partial class TycoonBoardManager
     {
         if (offerDealButtonTransform == null || !offerDealButtonTransform.gameObject.activeInHierarchy) return false;
         if (Time.time < lastButtonTouchTime) return false;
-        if (!isRightHandTracked && !isLeftHandTracked) return false;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return false;
 
         Collider col = offerDealButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.045f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.045f;
+        bool rightPoked = isRightIndexTracked && rightIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos) < 0.016f;
+        bool leftPoked = isLeftIndexTracked && leftIndexTipWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos) < 0.016f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.45f;
+            lastButtonTouchTime = Time.time + 0.35f;
             StartCoroutine(AnimateButtonPress(offerDealButtonTransform));
             return true;
         }
@@ -689,19 +713,23 @@ public partial class TycoonBoardManager
     int CheckStartMenuButtonPoke()
     {
         if (Time.time < lastButtonTouchTime) return -1;
-        if (!isRightHandTracked && !isLeftHandTracked) return -1;
+        if (!isRightIndexTracked && !isLeftIndexTracked) return -1;
 
         int closestIdx = -1;
-        float minContactDist = 0.048f;
+        float minContactDist = 0.016f;
 
         for (int i = 0; i < startMenuButtonTransforms.Length; i++)
         {
-            if (startMenuButtonTransforms[i] == null) continue;
+            if (startMenuButtonTransforms[i] == null || !startMenuButtonTransforms[i].gameObject.activeInHierarchy) continue;
             Collider btnCol = startMenuButtonTransforms[i].GetComponent<Collider>();
             if (btnCol == null) continue;
 
-            float dRight = isRightHandTracked ? Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
-            float dLeft = isLeftHandTracked ? Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dRight = (isRightIndexTracked && rightIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(btnCol.ClosestPoint(rightIndexTipWorldPos), rightIndexTipWorldPos)
+                : float.MaxValue;
+            float dLeft = (isLeftIndexTracked && leftIndexTipWorldPos.y > -50f)
+                ? Vector3.Distance(btnCol.ClosestPoint(leftIndexTipWorldPos), leftIndexTipWorldPos)
+                : float.MaxValue;
             float dMin = Mathf.Min(dRight, dLeft);
 
             if (dMin < minContactDist)
@@ -713,7 +741,7 @@ public partial class TycoonBoardManager
 
         if (closestIdx >= 0)
         {
-            lastButtonTouchTime = Time.time + 0.40f;
+            lastButtonTouchTime = Time.time + 0.35f;
             StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[closestIdx]));
             return closestIdx;
         }
