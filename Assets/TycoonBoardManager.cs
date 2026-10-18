@@ -2282,6 +2282,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         {
             minigameOrchestrator.CancelActiveMinigame();
         }
+        ClearActiveTransientVisuals();
         isLockpickingInProgress = false;
         HideJailLockpickButton();
 

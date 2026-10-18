@@ -100,47 +100,75 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    private readonly Dictionary<string, float> lastPlayedSoundTime = new Dictionary<string, float>();
+    private const float SOUND_DEBOUNCE_INTERVAL = 0.040f;
+    private readonly List<GameObject> activeTransientVisuals = new List<GameObject>();
+
+    public void ClearActiveTransientVisuals()
+    {
+        for (int i = activeTransientVisuals.Count - 1; i >= 0; i--)
+        {
+            if (activeTransientVisuals[i] != null)
+            {
+                Destroy(activeTransientVisuals[i]);
+            }
+        }
+        activeTransientVisuals.Clear();
+    }
+
     void GenerateProceduralSFX()
     {
         int sampleRate = 44100;
 
+        // 1. Procedural Dice: Warm wooden tumbler rattle (impulse + 180Hz body resonance with exponential decay)
         float[] diceSamples = new float[sampleRate / 8];
         for (int i = 0; i < diceSamples.Length; i++)
         {
-            float env = 1f - ((float)i / diceSamples.Length);
-            diceSamples[i] = (Random.Range(-1f, 1f) * 0.4f + Mathf.Sin(i * 0.18f) * 0.6f) * env * env;
+            float t = (float)i / sampleRate;
+            float env = Mathf.Exp(-t * 22f);
+            float body = Mathf.Sin(2f * Mathf.PI * 180f * t) * 0.45f + Mathf.Sin(2f * Mathf.PI * 340f * t) * 0.25f;
+            float tap = (Random.Range(-1f, 1f) * 0.35f);
+            diceSamples[i] = (body + tap) * env * 0.65f;
         }
         procDiceClip = AudioClip.Create("ProcDice", diceSamples.Length, 1, sampleRate, false);
         procDiceClip.SetData(diceSamples, 0);
 
+        // 2. Procedural Step: Solid tactile felt thud (120Hz fundamental with rapid acoustic decay)
         float[] stepSamples = new float[sampleRate / 12];
         for (int i = 0; i < stepSamples.Length; i++)
         {
             float t = (float)i / sampleRate;
-            float env = 1f - ((float)i / stepSamples.Length);
-            stepSamples[i] = Mathf.Sin(2f * Mathf.PI * (320f + i * 0.08f) * t) * env * 0.5f;
+            float env = Mathf.Exp(-t * 35f);
+            float thud = Mathf.Sin(2f * Mathf.PI * 125f * t) * 0.7f + Mathf.Sin(2f * Mathf.PI * 250f * t) * 0.3f;
+            stepSamples[i] = thud * env * 0.55f;
         }
         procStepClip = AudioClip.Create("ProcStep", stepSamples.Length, 1, sampleRate, false);
         procStepClip.SetData(stepSamples, 0);
 
+        // 3. Procedural Cash: Rich double metallic bell chime (880Hz + 1760Hz with warm third harmonic)
         float[] cashSamples = new float[sampleRate / 3];
         for (int i = 0; i < cashSamples.Length; i++)
         {
             float t = (float)i / sampleRate;
-            float freq = (i < cashSamples.Length / 2) ? 880f : 1318.5f;
-            float env = 1f - ((float)i / cashSamples.Length);
-            cashSamples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * env * 0.45f;
+            float f0 = (i < cashSamples.Length / 2) ? 880f : 1318.5f;
+            float subT = ((float)i % (cashSamples.Length / 2)) / sampleRate;
+            float env = Mathf.Exp(-subT * 12f);
+            float harmonic = Mathf.Sin(2f * Mathf.PI * f0 * t) * 0.6f +
+                             Mathf.Sin(2f * Mathf.PI * (f0 * 2f) * t) * 0.28f +
+                             Mathf.Sin(2f * Mathf.PI * (f0 * 3f) * t) * 0.12f;
+            cashSamples[i] = harmonic * env * 0.5f;
         }
         procCashClip = AudioClip.Create("ProcCash", cashSamples.Length, 1, sampleRate, false);
         procCashClip.SetData(cashSamples, 0);
 
+        // 4. Procedural Build: Precision hydraulic click & stone settling
         float[] buildSamples = new float[sampleRate / 2];
         for (int i = 0; i < buildSamples.Length; i++)
         {
             float t = (float)i / sampleRate;
             float env = 1f - ((float)i / buildSamples.Length);
             float f1 = Mathf.Lerp(261.6f, 523.2f, (float)i / buildSamples.Length);
-            buildSamples[i] = (Mathf.Sin(2f * Mathf.PI * f1 * t) + 0.5f * Mathf.Sin(2f * Mathf.PI * f1 * 1.5f * t)) * env * 0.35f;
+            buildSamples[i] = (Mathf.Sin(2f * Mathf.PI * f1 * t) * 0.5f + 0.3f * Mathf.Sin(2f * Mathf.PI * f1 * 1.5f * t) + 0.2f * Mathf.Sin(2f * Mathf.PI * f1 * 2f * t)) * env * 0.35f;
         }
         procBuildClip = AudioClip.Create("ProcBuild", buildSamples.Length, 1, sampleRate, false);
         procBuildClip.SetData(buildSamples, 0);
@@ -190,7 +218,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         procVoiceGamma = AudioClip.Create("ProcVoiceGamma", gammaLen, 1, sampleRate, false);
         procVoiceGamma.SetData(gammaSamples, 0);
 
-        // Spatial Police Siren (600 Hz <-> 920 Hz sine sweep over 0.65s)
+        // Spatial Police Siren (600 Hz <-> 920 Hz sweep over 0.65s)
         int sirenLen = Mathf.RoundToInt(sampleRate * 0.65f);
         float[] sirenSamples = new float[sirenLen];
         float sirenPhase = 0f;
@@ -207,7 +235,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         procSirenClip.SetData(sirenSamples, 0);
 
         // Looping VIP Helicopter Rotor Hum (22 Hz fundamental rotor pulse + 66 Hz drone)
-        int chopperLen = sampleRate; // 1 full second seamless loop
+        int chopperLen = sampleRate;
         float[] chopperSamples = new float[chopperLen];
         for (int i = 0; i < chopperLen; i++)
         {
@@ -235,9 +263,28 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     public void PlaySFX(AudioClip customClip, AudioClip fallbackClip, float pitch = 1f)
     {
+        PlaySoundBankSFX("DefaultSFX", customClip, fallbackClip, pitch);
+    }
+
+    public void PlaySoundBankSFX(string cueId, AudioClip customClip, AudioClip fallbackClip, float pitch = 1f, float volume = 1f)
+    {
         if (sfxSource == null) return;
+
+        if (!string.IsNullOrEmpty(cueId))
+        {
+            float now = Time.unscaledTime;
+            if (lastPlayedSoundTime.TryGetValue(cueId, out float lastTime) && (now - lastTime) < SOUND_DEBOUNCE_INTERVAL)
+            {
+                return; // Debounced to prevent multi-voice distortion/clipping
+            }
+            lastPlayedSoundTime[cueId] = now;
+        }
+
+        AudioClip clipToPlay = customClip != null ? customClip : fallbackClip;
+        if (clipToPlay == null) return;
+
         sfxSource.pitch = pitch;
-        sfxSource.PlayOneShot(customClip != null ? customClip : fallbackClip);
+        sfxSource.PlayOneShot(clipToPlay, volume);
     }
 
     public void PlayHaptic(float amplitude = 0.5f, float duration = 0.15f)
@@ -262,7 +309,7 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     public void PlayDiceRattleSound()
     {
-        PlaySFX(diceRollSound, procDiceClip, UnityEngine.Random.Range(0.95f, 1.25f));
+        PlaySoundBankSFX("DiceRattle", diceRollSound, procDiceClip, UnityEngine.Random.Range(0.95f, 1.25f));
     }
 
     public void SpawnCelebrationFireworks(Vector3 worldPos)
@@ -290,7 +337,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         float launchDuration = 0.42f;
         float elapsed = 0f;
 
-        PlaySFX(diceRollSound, procDiceClip, 1.35f);
+        PlaySoundBankSFX("CelebrationLaunch", diceRollSound, procDiceClip, 1.35f);
 
         for (int i = 0; i < count; i++)
         {
@@ -306,6 +353,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             if (r != null) r.material = CreateColoredMaterial(col, 0.95f, 0.1f);
 
             spheres[i] = s;
+            activeTransientVisuals.Add(s);
 
             float angleH = (i / (float)count) * Mathf.PI * 2f;
             float pitch = Random.Range(-0.35f, 0.85f);
@@ -328,7 +376,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             yield return null;
         }
 
-        PlaySFX(cashRegisterSound, procCashClip, 1.25f);
+        PlaySoundBankSFX("CelebrationBurst", cashRegisterSound, procCashClip, 1.25f);
         PlayHaptic(0.6f, 0.25f);
 
         float burstDuration = 1.35f;
@@ -354,7 +402,11 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            if (spheres[i] != null) Destroy(spheres[i]);
+            if (spheres[i] != null)
+            {
+                activeTransientVisuals.Remove(spheres[i]);
+                Destroy(spheres[i]);
+            }
         }
     }
 
@@ -372,6 +424,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             Destroy(coin.GetComponent<Collider>());
             coin.GetComponent<Renderer>().material = goldCoinMat;
             coins.Add(coin.transform);
+            activeTransientVisuals.Add(coin);
         }
 
         float duration = 0.55f;
