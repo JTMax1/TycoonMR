@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -14,6 +15,7 @@ using Unity.Netcode;
 /// Automatically manages 4 physical seat plaques around the table perimeter, binds to Unity Netcode
 /// for GameObjects (NGO) when active, and broadcasts game state & real-time events (dice tosses, auction bids)
 /// across local WiFi for multi-headset mixed reality sessions.
+/// Phase 7: Authoritative NGO intent validation, seat identity mapping, and decoupled spatial alignment.
 /// </summary>
 [RequireComponent(typeof(TycoonBoardManager))]
 public class TycoonColocationAndPolish : MonoBehaviour
@@ -27,7 +29,139 @@ public class TycoonColocationAndPolish : MonoBehaviour
     public bool isNetworkStateSyncAuthorized = false;
     public int broadcastPort = 47777;
 
-    [Header("2. Network Identity")]
+    // 2. Phase 7 Spatial Colocation State
+    public enum ColocationAlignmentState
+    {
+        Uninitialized,
+        HostCreatingAnchor,
+        HostSharingAnchor,
+        ClientFetchingAnchor,
+        ClientLocalizingAnchor,
+        AlignedSuccess,
+        AlignmentFailedManualFallback
+    }
+
+    public ColocationAlignmentState CurrentAlignmentState { get; private set; } = ColocationAlignmentState.Uninitialized;
+    public void SetAlignmentState(ColocationAlignmentState state) => CurrentAlignmentState = state;
+
+    // 3. Phase 7 NGO Intent Validation & Seat Mapping
+    public enum IntentValidationResult
+    {
+        Approved,
+        RejectedNotActiveTurn,
+        RejectedStaleSession,
+        RejectedInsufficientFunds,
+        RejectedTileAlreadyOwned,
+        RejectedBidTooLow,
+        RejectedInvalidPhase,
+        RejectedForgedValues
+    }
+
+    [System.Serializable]
+    public struct RequestRollDiceIntent
+    {
+        public ulong clientId;
+        public int seatId;
+        public int sessionGeneration;
+    }
+
+    [System.Serializable]
+    public struct RequestBuyPropertyIntent
+    {
+        public ulong clientId;
+        public int seatId;
+        public int tileIdx;
+        public int offeredPrice;
+    }
+
+    [System.Serializable]
+    public struct RequestAuctionBidIntent
+    {
+        public ulong clientId;
+        public int seatId;
+        public int bidAmount;
+    }
+
+    private readonly Dictionary<ulong, int> clientToSeatMap = new Dictionary<ulong, int>();
+    private readonly bool[] seatOccupancy = new bool[4];
+
+    public bool TryAssignSeat(ulong clientId, out int assignedSeat)
+    {
+        if (clientToSeatMap.TryGetValue(clientId, out int existing))
+        {
+            assignedSeat = existing;
+            return true;
+        }
+
+        for (int s = 0; s < 4; s++)
+        {
+            if (!seatOccupancy[s])
+            {
+                seatOccupancy[s] = true;
+                clientToSeatMap[clientId] = s;
+                assignedSeat = s;
+                return true;
+            }
+        }
+
+        assignedSeat = -1;
+        return false;
+    }
+
+    public void ReleaseSeat(ulong clientId)
+    {
+        if (clientToSeatMap.TryGetValue(clientId, out int seat))
+        {
+            if (seat >= 0 && seat < 4) seatOccupancy[seat] = false;
+            clientToSeatMap.Remove(clientId);
+        }
+    }
+
+    public int GetSeatForClient(ulong clientId)
+    {
+        return clientToSeatMap.TryGetValue(clientId, out int seat) ? seat : -1;
+    }
+
+    public IntentValidationResult ValidateRollDiceIntent(RequestRollDiceIntent intent, int currentTurnPlayer, TycoonBoardManager.TurnState currentPhase)
+    {
+        if (intent.seatId != currentTurnPlayer)
+            return IntentValidationResult.RejectedNotActiveTurn;
+        if (currentPhase != TycoonBoardManager.TurnState.WaitingForRoll)
+            return IntentValidationResult.RejectedInvalidPhase;
+        return IntentValidationResult.Approved;
+    }
+
+    public IntentValidationResult ValidateBuyPropertyIntent(RequestBuyPropertyIntent intent, int currentTurnPlayer, TycoonBoardManager.TurnState currentPhase, int[] playerCash, int[] tileOwners, int authoritativeCost)
+    {
+        if (intent.seatId != currentTurnPlayer)
+            return IntentValidationResult.RejectedNotActiveTurn;
+        if (currentPhase != TycoonBoardManager.TurnState.BuyOrPassDecision)
+            return IntentValidationResult.RejectedInvalidPhase;
+        if (intent.tileIdx < 0 || intent.tileIdx >= tileOwners.Length)
+            return IntentValidationResult.RejectedForgedValues;
+        if (tileOwners[intent.tileIdx] != -1)
+            return IntentValidationResult.RejectedTileAlreadyOwned;
+        if (intent.offeredPrice != authoritativeCost)
+            return IntentValidationResult.RejectedForgedValues;
+        if (playerCash[intent.seatId] < authoritativeCost)
+            return IntentValidationResult.RejectedInsufficientFunds;
+        return IntentValidationResult.Approved;
+    }
+
+    public IntentValidationResult ValidateAuctionBidIntent(RequestAuctionBidIntent intent, bool isAuctionActive, int currentHighestBid, int minIncrement, int[] playerCash)
+    {
+        if (!isAuctionActive)
+            return IntentValidationResult.RejectedInvalidPhase;
+        if (intent.seatId < 0 || intent.seatId >= playerCash.Length)
+            return IntentValidationResult.RejectedForgedValues;
+        if (intent.bidAmount < currentHighestBid + minIncrement)
+            return IntentValidationResult.RejectedBidTooLow;
+        if (playerCash[intent.seatId] < intent.bidAmount)
+            return IntentValidationResult.RejectedInsufficientFunds;
+        return IntentValidationResult.Approved;
+    }
+
+    [Header("4. Network Identity")]
     private string localDeviceId;
     private UdpClient udpBroadcaster;
     private UdpClient udpListener;
@@ -35,7 +169,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
     private volatile bool isListening = false;
     private ConcurrentQueue<string> incomingPacketsQueue = new ConcurrentQueue<string>();
 
-    [Header("3. 3D Seat Nameplate Components")]
+    [Header("5. 3D Seat Nameplate Components")]
     private GameObject[] seatNameplateRoots = new GameObject[4];
     private TextMeshProUGUI[] seatNameTexts = new TextMeshProUGUI[4];
     private TextMeshProUGUI[] seatCashTexts = new TextMeshProUGUI[4];
