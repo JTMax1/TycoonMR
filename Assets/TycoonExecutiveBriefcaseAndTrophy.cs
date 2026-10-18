@@ -716,4 +716,115 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
     }
 
     #endregion
+
+    #region D. Physical Rent Hand-Offs (Grab & Throw Cash Stack From Briefcase)
+
+    private GameObject grabbableRentCashBundle;
+    private Coroutine rentHandOffCoroutine;
+
+    public void ShowGrabbableRentCashBundle(int payerIdx, int recipientIdx, int rentDue, Action onFinished)
+    {
+        if (rentHandOffCoroutine != null) StopCoroutine(rentHandOffCoroutine);
+        rentHandOffCoroutine = StartCoroutine(RentCashBundleRoutine(payerIdx, recipientIdx, rentDue, onFinished));
+    }
+
+    private IEnumerator RentCashBundleRoutine(int payerIdx, int recipientIdx, int rentDue, Action onFinished)
+    {
+        if (grabbableRentCashBundle != null) Destroy(grabbableRentCashBundle);
+
+        Vector3 spawnPos = briefcaseRoot != null ? briefcaseRoot.transform.position + Vector3.up * 0.08f : transform.position + Vector3.up * 0.12f;
+
+        GameObject bundlePrefab = boardManager.cashBundlePrefab != null ? boardManager.cashBundlePrefab : boardManager.dollarBillPrefab;
+        if (bundlePrefab != null)
+        {
+            grabbableRentCashBundle = Instantiate(bundlePrefab, transform, false);
+            grabbableRentCashBundle.name = "Grabbable_Rent_CashBundle";
+            grabbableRentCashBundle.transform.position = spawnPos;
+            boardManager.StripRoguePhysicsFromImportedPrefab(grabbableRentCashBundle);
+            boardManager.NormalizePrefabSize(grabbableRentCashBundle, 0.055f, true);
+        }
+        else
+        {
+            grabbableRentCashBundle = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            grabbableRentCashBundle.name = "Grabbable_Rent_CashBundle";
+            grabbableRentCashBundle.transform.SetParent(transform, false);
+            grabbableRentCashBundle.transform.position = spawnPos;
+            grabbableRentCashBundle.transform.localScale = new Vector3(0.045f, 0.022f, 0.028f);
+            Destroy(grabbableRentCashBundle.GetComponent<Collider>());
+            grabbableRentCashBundle.GetComponent<Renderer>().material = boardManager.CreateColoredMaterial(new Color(0.18f, 0.95f, 0.45f), 0.92f);
+        }
+
+        // Floating Prompt
+        GameObject canvasGO = new GameObject("Rent_Cash_Canvas");
+        canvasGO.transform.SetParent(grabbableRentCashBundle.transform, false);
+        canvasGO.transform.localPosition = new Vector3(0f, 0.06f, 0f);
+        canvasGO.transform.localScale = Vector3.one * 0.00045f;
+        Canvas c = canvasGO.AddComponent<Canvas>();
+        c.renderMode = RenderMode.WorldSpace;
+        canvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(700f, 200f);
+
+        TextMeshProUGUI promptTMP = canvasGO.AddComponent<TextMeshProUGUI>();
+        promptTMP.text = $"<color=#FFD700><b>RENT OWED: ${rentDue}</b></color>\n<size=20><color=#00FF88>FLICK CASH ACROSS TABLE FOR +$15 REBATE! (3s)</color></size>";
+        promptTMP.alignment = TextAlignmentOptions.Center;
+        promptTMP.fontSize = 24f;
+        promptTMP.color = Color.white;
+
+        boardManager.PlaySFX(boardManager.CashRegisterSound, null, 1.1f);
+        boardManager.PlayHaptic(0.4f, 0.1f);
+
+        float timer = 3.0f;
+        bool wasFlicked = false;
+        Vector3 lastHandPos = boardManager.RightHandWorldPos;
+
+        while (timer > 0f)
+        {
+            timer -= Time.deltaTime;
+            promptTMP.text = $"<color=#FFD700><b>RENT OWED: ${rentDue}</b></color>\n<size=20><color=#00FF88>FLICK CASH ACROSS TABLE FOR +$15 REBATE! ({timer:F1}s)</color></size>";
+
+            Vector3 rPos = boardManager.RightHandWorldPos;
+            Vector3 lPos = boardManager.LeftHandWorldPos;
+            bool rTracked = boardManager.IsRightHandTracked && rPos.y > -50f;
+            bool lTracked = boardManager.IsLeftHandTracked && lPos.y > -50f;
+
+            float dR = rTracked ? Vector3.Distance(rPos, grabbableRentCashBundle.transform.position) : 99f;
+            float dL = lTracked ? Vector3.Distance(lPos, grabbableRentCashBundle.transform.position) : 99f;
+
+            Vector3 handVel = (rPos - lastHandPos) / Mathf.Max(0.001f, Time.deltaTime);
+            lastHandPos = rPos;
+
+            bool spacePressed = UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.spaceKey.wasPressedThisFrame;
+            bool handFlick = (dR < 0.09f || dL < 0.09f) && (handVel.magnitude > 0.45f || boardManager.IsPlayerHoldingDice);
+
+            if (handFlick || spacePressed)
+            {
+                wasFlicked = true;
+                break;
+            }
+
+            yield return null;
+        }
+
+        if (wasFlicked)
+        {
+            // Award +$15 Prompt Payer Rebate!
+            boardManager.AddPlayerCash(payerIdx, 15);
+            boardManager.PlaySFX(boardManager.CashRegisterSound, null, 1.35f);
+            boardManager.PlayHaptic(0.8f, 0.2f);
+            boardManager.RefreshDashboard(
+                "PROMPT PAYER REBATE (+$15)!",
+                "Swift hand-off! Boardroom awarded you a +$15 Prompt Payer Rebate!"
+            );
+        }
+
+        if (grabbableRentCashBundle != null)
+        {
+            Destroy(grabbableRentCashBundle);
+            grabbableRentCashBundle = null;
+        }
+
+        onFinished?.Invoke();
+        rentHandOffCoroutine = null;
+    }
+
+    #endregion
 }

@@ -39,6 +39,7 @@ public class TycoonTactileInteractions : MonoBehaviour
 
         UpdateVegasCuppedHandsDice();
         UpdateTradeContractInteractions();
+        UpdateHologramBlueprintBuilder();
     }
 
     // =========================================================================
@@ -181,6 +182,7 @@ public class TycoonTactileInteractions : MonoBehaviour
 
         boardManager.PlayDiceRattleSound();
         boardManager.PlayHaptic(0.6f, 0.15f);
+        boardManager.ColocationAndPolish?.BroadcastDiceThrow(finalThrow, -1, -1);
         boardManager.TriggerPhysicsDiceRoll(useImpulseToss: false);
     }
 
@@ -449,5 +451,235 @@ public class TycoonTactileInteractions : MonoBehaviour
         isTwoHandTearing = false;
         onContractSigned = null;
         onContractTorn = null;
+    }
+
+    // =========================================================================
+    // 3. THE HOLOGRAM BLUEPRINT BUILDER (PROPERTY UPGRADES)
+    // =========================================================================
+    private GameObject activeBlueprintRoot;
+    private Transform blueprintWireframe;
+    private Transform modernOrbTransform;
+    private Transform classicOrbTransform;
+    private Renderer modernOrbRenderer;
+    private Renderer classicOrbRenderer;
+    private int selectedArchitectureStyle = 0; // 0: Modern Glass, 1: Classic Executive
+    private Action<int> onBlueprintConstructed;
+    private Vector3 targetTilePlotWorldPos;
+    private float lastBlueprintActionTime = 0f;
+    private bool isSlammingBlueprint = false;
+
+    public void SpawnHologramBlueprint(TycoonBoardManager.BoardTile targetTile, Action<int> onConstruct)
+    {
+        DismissHologramBlueprint();
+
+        if (targetTile == null || targetTile.tileTransform == null) return;
+        onBlueprintConstructed = onConstruct;
+        targetTilePlotWorldPos = targetTile.tileTransform.position;
+
+        activeBlueprintRoot = new GameObject($"Hologram_Blueprint_{targetTile.name}");
+        activeBlueprintRoot.transform.position = targetTilePlotWorldPos + Vector3.up * 0.10f;
+        activeBlueprintRoot.transform.rotation = targetTile.tileTransform.rotation;
+
+        Material cyanHoloMat = boardManager.CreateColoredMaterial(new Color(0.15f, 0.85f, 1f, 0.75f), 0.95f, 0.2f);
+        Material goldHoloMat = boardManager.CreateColoredMaterial(new Color(1f, 0.84f, 0.25f, 0.75f), 0.95f, 0.5f);
+
+        // Holographic Wireframe Cube Box
+        GameObject wireframeGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wireframeGO.name = "Wireframe_Box";
+        wireframeGO.transform.SetParent(activeBlueprintRoot.transform, false);
+        wireframeGO.transform.localPosition = Vector3.zero;
+        wireframeGO.transform.localScale = new Vector3(0.075f, 0.11f, 0.075f);
+        Destroy(wireframeGO.GetComponent<Collider>());
+        wireframeGO.GetComponent<Renderer>().material = cyanHoloMat;
+        blueprintWireframe = wireframeGO.transform;
+
+        // Top Roof Accent
+        GameObject roofPyramid = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        roofPyramid.transform.SetParent(blueprintWireframe, false);
+        roofPyramid.transform.localPosition = new Vector3(0f, 0.55f, 0f);
+        roofPyramid.transform.localScale = new Vector3(0.85f, 0.18f, 0.85f);
+        Destroy(roofPyramid.GetComponent<Collider>());
+        roofPyramid.GetComponent<Renderer>().material = goldHoloMat;
+
+        // Floating Title Canvas
+        GameObject canvasGO = new GameObject("Blueprint_Canvas");
+        canvasGO.transform.SetParent(activeBlueprintRoot.transform, false);
+        canvasGO.transform.localPosition = new Vector3(0f, 0.09f, 0f);
+        canvasGO.transform.localScale = Vector3.one * 0.00045f;
+        Canvas c = canvasGO.AddComponent<Canvas>();
+        c.renderMode = RenderMode.WorldSpace;
+        canvasGO.GetComponent<RectTransform>().sizeDelta = new Vector2(750f, 250f);
+
+        TextMeshProUGUI titleTMP = canvasGO.AddComponent<TextMeshProUGUI>();
+        titleTMP.text = $"<b>HOLOGRAM BLUEPRINT: {targetTile.name.ToUpper()}</b>\n<size=22><color=#66DDFF>[MODERN GLASS]</color> vs <color=#FFD700>[CLASSIC EXECUTIVE]</color>\n<color=#00FF88>SLAM HAND DOWNWARD TO HAMMER INTO PLOT!</color></size>";
+        titleTMP.alignment = TextAlignmentOptions.Center;
+        titleTMP.fontSize = 26f;
+        titleTMP.color = Color.white;
+
+        // 2 Floating Style Selector Orbs
+        // Orb 0: Modern Glass (Left)
+        GameObject orb0 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        orb0.name = "Selector_Orb_Modern";
+        orb0.transform.SetParent(activeBlueprintRoot.transform, false);
+        orb0.transform.localPosition = new Vector3(-0.065f, 0.035f, 0f);
+        orb0.transform.localScale = Vector3.one * 0.035f;
+        modernOrbRenderer = orb0.GetComponent<Renderer>();
+        modernOrbRenderer.material = cyanHoloMat;
+        modernOrbTransform = orb0.transform;
+
+        // Orb 1: Classic Executive (Right)
+        GameObject orb1 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        orb1.name = "Selector_Orb_Classic";
+        orb1.transform.SetParent(activeBlueprintRoot.transform, false);
+        orb1.transform.localPosition = new Vector3(0.065f, 0.035f, 0f);
+        orb1.transform.localScale = Vector3.one * 0.035f;
+        classicOrbRenderer = orb1.GetComponent<Renderer>();
+        classicOrbRenderer.material = goldHoloMat;
+        classicOrbTransform = orb1.transform;
+
+        selectedArchitectureStyle = 0;
+        isSlammingBlueprint = false;
+
+        boardManager.PlaySFX(boardManager.BuildUpgradeSound, null, 1.25f);
+        boardManager.PlayHaptic(0.5f, 0.15f);
+        boardManager.RefreshDashboard(
+            $"BLUEPRINT: {targetTile.name.ToUpper()}",
+            "Poke orb to switch architecture style, then SLAM HAND DOWNWARD to construct!"
+        );
+    }
+
+    void UpdateHologramBlueprintBuilder()
+    {
+        if (activeBlueprintRoot == null || isSlammingBlueprint) return;
+
+        // Rotate wireframe slightly for holographic float effect
+        if (blueprintWireframe != null)
+        {
+            blueprintWireframe.Rotate(Vector3.up, 35f * Time.deltaTime, Space.Self);
+        }
+
+        Vector3 leftPos = boardManager.LeftHandWorldPos;
+        Vector3 rightPos = boardManager.RightHandWorldPos;
+        bool leftTracked = boardManager.IsLeftHandTracked && leftPos.y > -50f;
+        bool rightTracked = boardManager.IsRightHandTracked && rightPos.y > -50f;
+
+        // 1. Check Style Selector Orb Poke
+        if (Time.time > lastBlueprintActionTime)
+        {
+            if (modernOrbTransform != null)
+            {
+                float dL = leftTracked ? Vector3.Distance(leftPos, modernOrbTransform.position) : 99f;
+                float dR = rightTracked ? Vector3.Distance(rightPos, modernOrbTransform.position) : 99f;
+                if (dL < 0.035f || dR < 0.035f)
+                {
+                    selectedArchitectureStyle = 0;
+                    lastBlueprintActionTime = Time.time + 0.35f;
+                    boardManager.PlayHaptic(0.4f, 0.08f);
+                    boardManager.PlaySFX(boardManager.TokenMoveSound, null, 1.4f);
+                    if (blueprintWireframe != null)
+                    {
+                        blueprintWireframe.GetComponent<Renderer>().material = boardManager.CreateColoredMaterial(new Color(0.15f, 0.85f, 1f, 0.75f), 0.95f, 0.2f);
+                    }
+                    boardManager.RefreshDashboard("SELECTED: MODERN GLASS STYLE", "SLAM HAND DOWNWARD into tile plot to construct!");
+                }
+            }
+
+            if (classicOrbTransform != null)
+            {
+                float dL = leftTracked ? Vector3.Distance(leftPos, classicOrbTransform.position) : 99f;
+                float dR = rightTracked ? Vector3.Distance(rightPos, classicOrbTransform.position) : 99f;
+                if (dL < 0.035f || dR < 0.035f)
+                {
+                    selectedArchitectureStyle = 1;
+                    lastBlueprintActionTime = Time.time + 0.35f;
+                    boardManager.PlayHaptic(0.4f, 0.08f);
+                    boardManager.PlaySFX(boardManager.TokenMoveSound, null, 1.1f);
+                    if (blueprintWireframe != null)
+                    {
+                        blueprintWireframe.GetComponent<Renderer>().material = boardManager.CreateColoredMaterial(new Color(1f, 0.84f, 0.25f, 0.75f), 0.95f, 0.5f);
+                    }
+                    boardManager.RefreshDashboard("SELECTED: CLASSIC EXECUTIVE STYLE", "SLAM HAND DOWNWARD into tile plot to construct!");
+                }
+            }
+        }
+
+        // 2. Check Downward Hand Slam / Plunge into the Plot
+        Vector3 rootPos = activeBlueprintRoot.transform.position;
+        float dLeftPlot = leftTracked ? Vector3.Distance(new Vector3(leftPos.x, rootPos.y, leftPos.z), rootPos) : 99f;
+        float dRightPlot = rightTracked ? Vector3.Distance(new Vector3(rightPos.x, rootPos.y, rightPos.z), rootPos) : 99f;
+
+        bool leftPlunged = leftTracked && dLeftPlot < 0.09f && leftPos.y < (rootPos.y - 0.025f);
+        bool rightPlunged = rightTracked && dRightPlot < 0.09f && rightPos.y < (rootPos.y - 0.025f);
+        bool keyboardSlam = UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.enterKey.wasPressedThisFrame;
+
+        if (leftPlunged || rightPlunged || keyboardSlam)
+        {
+            isSlammingBlueprint = true;
+            StartCoroutine(AnimateBlueprintHammerDown());
+        }
+    }
+
+    IEnumerator AnimateBlueprintHammerDown()
+    {
+        boardManager.PlayHaptic(0.9f, 0.3f);
+        boardManager.PlaySFX(boardManager.BuildUpgradeSound, null, 0.95f);
+
+        float duration = 0.25f;
+        float elapsed = 0f;
+        Vector3 startPos = activeBlueprintRoot.transform.position;
+        Vector3 endPos = targetTilePlotWorldPos + Vector3.up * 0.015f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            if (activeBlueprintRoot != null)
+            {
+                activeBlueprintRoot.transform.position = Vector3.Lerp(startPos, endPos, t * t);
+                activeBlueprintRoot.transform.localScale = Vector3.Lerp(Vector3.one, new Vector3(1.15f, 0.35f, 1.15f), t);
+            }
+            yield return null;
+        }
+
+        // Expanding golden shockwave ring
+        GameObject shockwave = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        shockwave.name = "Blueprint_Shockwave";
+        shockwave.transform.position = targetTilePlotWorldPos + Vector3.up * 0.02f;
+        shockwave.transform.localScale = new Vector3(0.04f, 0.002f, 0.04f);
+        Destroy(shockwave.GetComponent<Collider>());
+        Material goldRingMat = boardManager.CreateColoredMaterial(new Color(1f, 0.85f, 0.25f), 0.95f, 0.85f);
+        shockwave.GetComponent<Renderer>().material = goldRingMat;
+
+        // Finalize building construction callback
+        var cb = onBlueprintConstructed;
+        int style = selectedArchitectureStyle;
+        DismissHologramBlueprint();
+
+        cb?.Invoke(style);
+
+        // Animate expanding shockwave over 0.35s
+        elapsed = 0f;
+        while (elapsed < 0.35f)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / 0.35f;
+            if (shockwave != null)
+            {
+                shockwave.transform.localScale = new Vector3(0.04f + t * 0.22f, 0.002f, 0.04f + t * 0.22f);
+            }
+            yield return null;
+        }
+        if (shockwave != null) Destroy(shockwave);
+    }
+
+    public void DismissHologramBlueprint()
+    {
+        if (activeBlueprintRoot != null)
+        {
+            Destroy(activeBlueprintRoot);
+            activeBlueprintRoot = null;
+        }
+        isSlammingBlueprint = false;
+        onBlueprintConstructed = null;
     }
 }

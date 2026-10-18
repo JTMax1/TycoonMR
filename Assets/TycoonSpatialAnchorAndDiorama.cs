@@ -195,6 +195,13 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
                 sa.SaveAnchorAsync();
                 Debug.Log($"<color=#00FF88>[TycoonSpatialAnchor]</color> Physical table anchor locked and saved: UUID = {sa.Uuid}");
             }
+            catch (Exception ex)
+            {
+                Debug.Log($"[TycoonSpatialAnchor] SaveAnchorAsync note: {ex.Message}");
+            }
+        }
+    }
+
     public void AlignToSharedAnchor(string remoteUuid)
     {
         if (string.IsNullOrEmpty(remoteUuid)) return;

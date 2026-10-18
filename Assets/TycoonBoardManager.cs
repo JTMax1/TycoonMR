@@ -164,6 +164,7 @@ public class TycoonBoardManager : MonoBehaviour
     public TycoonExecutiveBriefcaseAndTrophy ExecutiveBriefcaseAndTrophy => executiveBriefcaseAndTrophy;
     private TycoonColocationAndPolish colocationAndPolish;
     public TycoonColocationAndPolish ColocationAndPolish => colocationAndPolish;
+    public AudioClip BuildUpgradeSound => buildUpgradeSound;
 
     public bool isPassAndPlayMode = false;
     public Vector3 LockedBoardPosition { get => lockedBoardPosition; set { lockedBoardPosition = value; transform.position = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
@@ -239,9 +240,31 @@ public class TycoonBoardManager : MonoBehaviour
             }
             RebuildMonopolySynergyBeams();
         }
+        if (!string.IsNullOrEmpty(anchorUuid) && spatialAnchorAndDiorama != null)
+        {
+            spatialAnchorAndDiorama.AlignToSharedAnchor(anchorUuid);
+        }
+
         CurrentTurnPlayer = turnPlayer;
         UpdateLiveHUDStats();
     }
+
+    public void ExecuteRemoteDiceTumble(Vector3 velocity, int d1Target, int d2Target)
+    {
+        if (physDie1 != null) physDie1.LaunchWithDirectVelocity(velocity, transform.position);
+        if (physDie2 != null) physDie2.LaunchWithDirectVelocity(velocity + Vector3.right * 0.05f, transform.position);
+        PlayDiceRattleSound();
+        PlaySFX(diceRollSound, procDiceClip, 1.15f);
+        RefreshDashboard("REMOTE PLAYER THREW DICE!", "Synchronizing real-time physics dice roll across headsets...");
+    }
+
+    public void ApplyRemoteAuctionBid(int bidderIdx, int bidAmount)
+    {
+        StartCoroutine(AnimateGavelStrike());
+        PlaySFX(diceRollSound, procDiceClip, 1.4f);
+        RefreshDashboard($"AUCTION BID: ${bidAmount}", $"{GetPlayerName(bidderIdx).ToUpper()} placed bid of ${bidAmount}!");
+    }
+
     private GameObject jailLockpickButton;
     private bool isLockpickingInProgress = false;
 
@@ -295,10 +318,15 @@ public class TycoonBoardManager : MonoBehaviour
     private AvatarMood currentRivalMood = AvatarMood.Neutral;
     private float moodResetTimer = 0f;
 
-    // Phase 9: 3D Holographic Start Menu Fields
+    // Phase 19: 4 Match Modes (AI, Pass-and-Play, Local WiFi, Online)
+    public enum MatchMultiplayerMode { VsAIMoguls, PassAndPlay, LocalWiFiColocation, OnlineMultiplayer }
+    public MatchMultiplayerMode currentMatchMode = MatchMultiplayerMode.VsAIMoguls;
+    public System.Action<MatchMultiplayerMode> OnMultiplayerMatchRequested;
+
+    // Phase 9 & 19: 3D Holographic Start Menu Fields
     private GameObject startMenuHolder;
-    private Transform[] startMenuButtonTransforms = new Transform[4];
-    private TextMeshProUGUI[] startMenuButtonTexts = new TextMeshProUGUI[4];
+    private Transform[] startMenuButtonTransforms = new Transform[5];
+    private TextMeshProUGUI[] startMenuButtonTexts = new TextMeshProUGUI[5];
 
     private TextMeshProUGUI dashboardTitleTMP;
     private TextMeshProUGUI dashboardBodyTMP;
@@ -757,6 +785,7 @@ public class TycoonBoardManager : MonoBehaviour
         if (m.HasProperty("_Color")) m.SetColor("_Color", color);
         if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
         if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", metallic);
+        m.enableInstancing = true;
         sharedMaterialCache[c32] = m;
         return m;
     }
@@ -1024,6 +1053,41 @@ public class TycoonBoardManager : MonoBehaviour
             catch { }
         }
 
+        // 4. Hybrid Quest Touch Controller Support
+        // If either hand wasn't tracked, or if Touch Controllers are active, read controller positions & inputs
+        bool rTouchConnected = OVRInput.IsControllerConnected(OVRInput.Controller.RTouch);
+        bool lTouchConnected = OVRInput.IsControllerConnected(OVRInput.Controller.LTouch);
+
+        if (rTouchConnected)
+        {
+            if (!isRightHandTracked)
+            {
+                isRightHandTracked = true;
+                Vector3 ctrlLocal = OVRInput.GetLocalControllerPosition(OVRInput.Controller.RTouch);
+                rightHandWorldPos = refSpace.TransformPoint(ctrlLocal);
+            }
+
+            bool rControllerPinch = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) ||
+                                    OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch) ||
+                                    OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch);
+            isRightPinching |= rControllerPinch;
+        }
+
+        if (lTouchConnected)
+        {
+            if (!isLeftHandTracked)
+            {
+                isLeftHandTracked = true;
+                Vector3 ctrlLocal = OVRInput.GetLocalControllerPosition(OVRInput.Controller.LTouch);
+                leftHandWorldPos = refSpace.TransformPoint(ctrlLocal);
+            }
+
+            bool lControllerPinch = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch) ||
+                                    OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch) ||
+                                    OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch);
+            isLeftPinching |= lControllerPinch;
+        }
+
         // Two-Hand Pinch Move & Scale
         if (!isInPenthouseVR && !isPlayerHoldingDice && isRightHandTracked && isLeftHandTracked && isRightPinching && isLeftPinching)
         {
@@ -1129,11 +1193,23 @@ public class TycoonBoardManager : MonoBehaviour
         {
             int startBtn = CheckStartMenuButtonPoke();
             bool spaceOrEnter = Keyboard.current != null && (Keyboard.current.spaceKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame);
+            bool modeKey = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
             bool rKey = Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
             bool diffKey = Keyboard.current != null && Keyboard.current.dKey.wasPressedThisFrame;
             bool cashKey = Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
 
-            if (startBtn == 0 || rKey)
+            if (startBtn == 0 || modeKey)
+            {
+                if (currentMatchMode == MatchMultiplayerMode.VsAIMoguls) currentMatchMode = MatchMultiplayerMode.PassAndPlay;
+                else if (currentMatchMode == MatchMultiplayerMode.PassAndPlay) currentMatchMode = MatchMultiplayerMode.LocalWiFiColocation;
+                else if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation) currentMatchMode = MatchMultiplayerMode.OnlineMultiplayer;
+                else currentMatchMode = MatchMultiplayerMode.VsAIMoguls;
+
+                UpdateStartMenuUI();
+                PlaySFX(tokenMoveSound, procStepClip, 1.25f);
+                PlayHaptic(0.2f, 0.1f);
+            }
+            else if (startBtn == 1 || rKey)
             {
                 activePlayerCount++;
                 if (activePlayerCount > 4) activePlayerCount = 2;
@@ -1142,7 +1218,7 @@ public class TycoonBoardManager : MonoBehaviour
                 PlaySFX(tokenMoveSound, procStepClip, 1.2f);
                 PlayHaptic(0.2f, 0.1f);
             }
-            else if (startBtn == 1 || diffKey)
+            else if (startBtn == 2 || diffKey)
             {
                 if (aiDifficulty == AIDifficulty.Tycoon) aiDifficulty = AIDifficulty.Billionaire;
                 else if (aiDifficulty == AIDifficulty.Billionaire) aiDifficulty = AIDifficulty.Casual;
@@ -1151,7 +1227,7 @@ public class TycoonBoardManager : MonoBehaviour
                 PlaySFX(tokenMoveSound, procStepClip, 1.3f);
                 PlayHaptic(0.2f, 0.1f);
             }
-            else if (startBtn == 2 || cashKey)
+            else if (startBtn == 3 || cashKey)
             {
                 if (startingCashConfig == 1500) startingCashConfig = 2500;
                 else if (startingCashConfig == 2500) startingCashConfig = 1000;
@@ -1160,7 +1236,7 @@ public class TycoonBoardManager : MonoBehaviour
                 PlaySFX(procCashClip, procCashClip, 1.1f);
                 PlayHaptic(0.2f, 0.1f);
             }
-            else if (startBtn == 3 || spaceOrEnter)
+            else if (startBtn == 4 || spaceOrEnter)
             {
                 LaunchEmpireMatch();
             }
@@ -2434,6 +2510,11 @@ public class TycoonBoardManager : MonoBehaviour
 
     void ToggleRooftopVantagePoint()
     {
+        TriggerComfortVignetteTransition(ExecuteRooftopVantagePoint);
+    }
+
+    private void ExecuteRooftopVantagePoint()
+    {
         Transform eye = Camera.main != null ? Camera.main.transform : null;
         if (!isInPenthouseVR || eye == null) return;
         vrVantageIndex = (vrVantageIndex + 1) % 3;
@@ -3565,7 +3646,7 @@ public class TycoonBoardManager : MonoBehaviour
 
         startMenuHolder = new GameObject("Executive_Start_Menu");
         startMenuHolder.transform.SetParent(transform, false);
-        startMenuHolder.transform.localPosition = new Vector3(0f, 0.34f, -0.15f);
+        startMenuHolder.transform.localPosition = new Vector3(0f, 0.35f, -0.15f);
         startMenuHolder.transform.localRotation = Quaternion.Euler(14f, 0f, 0f);
 
         // Dark frosted holographic backdrop panel
@@ -3574,7 +3655,7 @@ public class TycoonBoardManager : MonoBehaviour
         bg.transform.SetParent(startMenuHolder.transform, false);
         bg.transform.localPosition = Vector3.zero;
         bg.transform.localRotation = Quaternion.identity;
-        bg.transform.localScale = new Vector3(0.54f, 0.36f, 0.012f);
+        bg.transform.localScale = new Vector3(0.54f, 0.43f, 0.012f);
         Destroy(bg.GetComponent<Collider>());
         bg.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.04f, 0.07f, 0.14f), 0.92f);
 
@@ -3584,14 +3665,14 @@ public class TycoonBoardManager : MonoBehaviour
         border.transform.SetParent(startMenuHolder.transform, false);
         border.transform.localPosition = new Vector3(0f, 0f, 0.002f);
         border.transform.localRotation = Quaternion.identity;
-        border.transform.localScale = new Vector3(0.548f, 0.368f, 0.008f);
+        border.transform.localScale = new Vector3(0.548f, 0.438f, 0.008f);
         Destroy(border.GetComponent<Collider>());
         border.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.45f);
 
         // Header Canvas
         GameObject headerCanvasGO = new GameObject("StartMenu_HeaderCanvas");
         headerCanvasGO.transform.SetParent(startMenuHolder.transform, false);
-        headerCanvasGO.transform.localPosition = new Vector3(0f, 0.125f, -0.015f);
+        headerCanvasGO.transform.localPosition = new Vector3(0f, 0.165f, -0.015f);
         headerCanvasGO.transform.localRotation = Quaternion.identity;
         headerCanvasGO.transform.localScale = Vector3.one * 0.00065f;
         Canvas hc = headerCanvasGO.AddComponent<Canvas>();
@@ -3606,26 +3687,28 @@ public class TycoonBoardManager : MonoBehaviour
         headerTMP.alignment = TextAlignmentOptions.Center;
         headerTMP.rectTransform.sizeDelta = new Vector2(760f, 100f);
 
-        // 4 Interactive 3D Poke Buttons
-        // Button 0: Rivals Selector
-        // Button 1: Difficulty Selector
-        // Button 2: Start Cash Selector
-        // Button 3: Launch Empire Match
-        float[] yPositions = { 0.052f, -0.008f, -0.068f, -0.128f };
+        // 5 Interactive 3D Poke Buttons
+        // Button 0: Match Mode Selector
+        // Button 1: Rivals / Players Selector
+        // Button 2: Difficulty Selector
+        // Button 3: Start Cash Selector
+        // Button 4: Launch Empire Match
+        float[] yPositions = { 0.095f, 0.040f, -0.015f, -0.070f, -0.135f };
         Color[] btnColors = {
-            new Color(0.18f, 0.45f, 0.85f), // Slate Blue
-            new Color(0.85f, 0.55f, 0.15f), // Royal Amber
-            new Color(0.55f, 0.25f, 0.85f), // Purple
-            new Color(0.18f, 0.85f, 0.45f)  // Emerald Green
+            new Color(0.12f, 0.65f, 0.85f), // Cyan Blue (Mode)
+            new Color(0.18f, 0.45f, 0.85f), // Slate Blue (Rivals)
+            new Color(0.85f, 0.55f, 0.15f), // Royal Amber (Difficulty)
+            new Color(0.55f, 0.25f, 0.85f), // Purple (Cash)
+            new Color(0.18f, 0.85f, 0.45f)  // Emerald Green (Launch)
         };
 
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 5; i++)
         {
             GameObject btnCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             btnCube.name = $"StartMenu_Btn_{i}";
             btnCube.transform.SetParent(startMenuHolder.transform, false);
             btnCube.transform.localPosition = new Vector3(0f, yPositions[i], -0.010f);
-            btnCube.transform.localScale = new Vector3(0.46f, 0.046f, 0.018f);
+            btnCube.transform.localScale = new Vector3(0.48f, 0.044f, 0.018f);
 
             BoxCollider col = btnCube.GetComponent<BoxCollider>();
             if (col != null) col.isTrigger = true;
@@ -3647,7 +3730,7 @@ public class TycoonBoardManager : MonoBehaviour
             GameObject txtGO = new GameObject("Text");
             txtGO.transform.SetParent(btnCanvasGO.transform, false);
             TextMeshProUGUI tmp = txtGO.AddComponent<TextMeshProUGUI>();
-            tmp.fontSize = 28;
+            tmp.fontSize = 26;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
@@ -3663,37 +3746,56 @@ public class TycoonBoardManager : MonoBehaviour
     {
         if (startMenuButtonTexts[0] != null)
         {
-            if (activePlayerCount == 2)
-                startMenuButtonTexts[0].text = "RIVALS: 1 AI (1v1 DUEL)";
-            else if (activePlayerCount == 3)
-                startMenuButtonTexts[0].text = "RIVALS: 2 AI (3-PLAYER MATCH)";
-            else
-                startMenuButtonTexts[0].text = "RIVALS: 3 AI (4-PLAYER FULL TABLE)";
+            switch (currentMatchMode)
+            {
+                case MatchMultiplayerMode.VsAIMoguls:
+                    startMenuButtonTexts[0].text = "MODE: HUMAN VS AI MOGULS";
+                    break;
+                case MatchMultiplayerMode.PassAndPlay:
+                    startMenuButtonTexts[0].text = "MODE: 1. PASS-AND-PLAY (ROTATION)";
+                    break;
+                case MatchMultiplayerMode.LocalWiFiColocation:
+                    startMenuButtonTexts[0].text = "MODE: 2. LOCAL WIFI (COLOCATION)";
+                    break;
+                case MatchMultiplayerMode.OnlineMultiplayer:
+                    startMenuButtonTexts[0].text = "MODE: 3. ONLINE MULTIPLAYER";
+                    break;
+            }
         }
 
         if (startMenuButtonTexts[1] != null)
         {
-            if (aiDifficulty == AIDifficulty.Tycoon)
-                startMenuButtonTexts[1].text = "DIFFICULTY: TYCOON (NORMAL)";
-            else if (aiDifficulty == AIDifficulty.Billionaire)
-                startMenuButtonTexts[1].text = "DIFFICULTY: BILLIONAIRE (HARD)";
+            if (activePlayerCount == 2)
+                startMenuButtonTexts[1].text = "RIVALS: 1 AI (1v1 DUEL)";
+            else if (activePlayerCount == 3)
+                startMenuButtonTexts[1].text = "RIVALS: 2 AI (3-PLAYER MATCH)";
             else
-                startMenuButtonTexts[1].text = "DIFFICULTY: CASUAL (EASY)";
+                startMenuButtonTexts[1].text = "RIVALS: 3 AI (4-PLAYER FULL TABLE)";
         }
 
         if (startMenuButtonTexts[2] != null)
         {
-            if (startingCashConfig == 1500)
-                startMenuButtonTexts[2].text = "START CASH: $1500 (STANDARD)";
-            else if (startingCashConfig == 2500)
-                startMenuButtonTexts[2].text = "START CASH: $2500 (EXECUTIVE)";
+            if (aiDifficulty == AIDifficulty.Tycoon)
+                startMenuButtonTexts[2].text = "DIFFICULTY: TYCOON (NORMAL)";
+            else if (aiDifficulty == AIDifficulty.Billionaire)
+                startMenuButtonTexts[2].text = "DIFFICULTY: BILLIONAIRE (HARD)";
             else
-                startMenuButtonTexts[2].text = "START CASH: $1000 (HARDCORE)";
+                startMenuButtonTexts[2].text = "DIFFICULTY: CASUAL (EASY)";
         }
 
         if (startMenuButtonTexts[3] != null)
         {
-            startMenuButtonTexts[3].text = "LAUNCH EMPIRE MATCH";
+            if (startingCashConfig == 1500)
+                startMenuButtonTexts[3].text = "START CASH: $1500 (STANDARD)";
+            else if (startingCashConfig == 2500)
+                startMenuButtonTexts[3].text = "START CASH: $2500 (EXECUTIVE)";
+            else
+                startMenuButtonTexts[3].text = "START CASH: $1000 (HARDCORE)";
+        }
+
+        if (startMenuButtonTexts[4] != null)
+        {
+            startMenuButtonTexts[4].text = "LAUNCH EMPIRE MATCH";
         }
     }
 
@@ -3706,12 +3808,27 @@ public class TycoonBoardManager : MonoBehaviour
         }
         UpdateActivePlayerVisibilities();
         UpdateStartMenuUI();
-        RefreshDashboard("EXECUTIVE START MENU", "Configure Rivals, Difficulty, & Starting Capital, then poke [LAUNCH]!");
+        RefreshDashboard("EXECUTIVE START MENU", "Configure Mode, Rivals, Difficulty, & Starting Capital, then poke [LAUNCH]!");
         SetRivalReaction(1, AvatarMood.Thinking, "Configure the boardroom match! Will you dare face 3 AI Moguls?");
     }
 
     public void LaunchEmpireMatch()
     {
+        if (currentMatchMode == MatchMultiplayerMode.PassAndPlay)
+        {
+            isPassAndPlayMode = true;
+            if (spatialAnchorAndDiorama != null) spatialAnchorAndDiorama.RotateBoardToSeat(0);
+        }
+        else
+        {
+            isPassAndPlayMode = false;
+        }
+
+        if (currentMatchMode == MatchMultiplayerMode.LocalWiFiColocation || currentMatchMode == MatchMultiplayerMode.OnlineMultiplayer)
+        {
+            OnMultiplayerMatchRequested?.Invoke(currentMatchMode);
+        }
+
         for (int i = 0; i < 4; i++)
         {
             playerCash[i] = startingCashConfig;
@@ -4084,6 +4201,8 @@ public class TycoonBoardManager : MonoBehaviour
         SpawnCornerLandmark(10, jailCornerLandmarkPrefab, "Landmark_Jail_PoliceStation");
         SpawnCornerLandmark(20, freeParkingLandmarkPrefab, "Landmark_FreeParking_Hospital");
         SpawnCornerLandmark(30, goToJailLandmarkPrefab, "Landmark_GoToJail_School");
+
+        StaticBatchingUtility.Combine(new GameObject[] { tableBase, goldRim }, gameObject);
     }
 
     void SpawnCornerLandmark(int cornerTileIdx, GameObject prefab, string landmarkName)
@@ -4288,6 +4407,9 @@ public class TycoonBoardManager : MonoBehaviour
                 physDie2.EndHandGrabAndThrow(transform.position);
             }
 
+            Vector3 launchVel = (physDie1.GetComponent<Rigidbody>() != null) ? physDie1.GetComponent<Rigidbody>().linearVelocity : (Vector3.up * 1.5f + Vector3.forward * 0.5f);
+            colocationAndPolish?.BroadcastDiceThrow(launchVel, -1, -1);
+
             PlaySFX(diceRollSound, procDiceClip, 1.0f);
             RefreshDashboard("3D PHYSICS DICE TUMBLING...", "Watching where the dice settle on Central Park!");
 
@@ -4455,6 +4577,31 @@ public class TycoonBoardManager : MonoBehaviour
                 else if (tile.owner != playerIdx)
                 {
                     int rent = CalculateAuthenticRent(tile, lastDiceTotal);
+
+                    // Phase 21: Defensive Sabotage / Laser-Grid Heist Minigame when rent >= 100
+                    if (playerIdx == 0 && rent >= 100 && minigameOrchestrator != null)
+                    {
+                        RefreshDashboard("SECURITY LASER GRID DETECTED!", "Hack 3 green nodes without tripping the laser to slash rent!");
+                        bool heistDone = false;
+                        minigameOrchestrator.RunLaserHeistSabotageMinigame(rent, (discounted) =>
+                        {
+                            rent = discounted;
+                            heistDone = true;
+                        });
+                        while (!heistDone) yield return null;
+                    }
+
+                    // Phase 21: Physical Rent Hand-Offs (Grab & Throw Cash Stack From Briefcase)
+                    if (playerIdx == 0 && rent > 0 && executiveBriefcaseAndTrophy != null)
+                    {
+                        bool handoffDone = false;
+                        executiveBriefcaseAndTrophy.ShowGrabbableRentCashBundle(playerIdx, tile.owner, rent, () =>
+                        {
+                            handoffDone = true;
+                        });
+                        while (!handoffDone) yield return null;
+                    }
+
                     playerCash[playerIdx] -= rent;
                     playerCash[tile.owner] += rent;
                     PlaySFX(cashRegisterSound, procCashClip, 0.9f);
@@ -4778,13 +4925,30 @@ public class TycoonBoardManager : MonoBehaviour
             return;
         }
 
+        if (playerIdx == 0 && tactileInteractions != null)
+        {
+            tactileInteractions.SpawnHologramBlueprint(targetTile, (chosenStyle) =>
+            {
+                ExecuteBuildingUpgrade(playerIdx, targetTile, actualBuildCost, chosenStyle);
+            });
+        }
+        else
+        {
+            ExecuteBuildingUpgrade(playerIdx, targetTile, actualBuildCost, 0);
+        }
+    }
+
+    void ExecuteBuildingUpgrade(int playerIdx, BoardTile targetTile, int actualBuildCost, int chosenStyle = 0)
+    {
+        if (targetTile == null || playerCash[playerIdx] < actualBuildCost || targetTile.buildingLevel >= 5) return;
+
         playerCash[playerIdx] -= actualBuildCost;
         targetTile.buildingLevel++;
         buildCycleCursor = (targetTile.index + 1) % 40;
 
         PlaySFX(buildUpgradeSound, procBuildClip, 0.9f + (targetTile.buildingLevel * 0.08f));
         StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, targetTile.tileTransform.position, 5));
-        ConstructChronological3DBuilding(targetTile);
+        ConstructChronological3DBuilding(targetTile, chosenStyle);
 
         string tierLabel = (targetTile.buildingLevel == 5)
             ? "LVL 5 SKYSCRAPER HOTEL"
@@ -4799,8 +4963,9 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
 
+        string styleLabel = (chosenStyle == 1) ? " [CLASSIC EXECUTIVE]" : " [MODERN GLASS]";
         RefreshDashboard(
-            $"BUILT {tierLabel} ON {targetTile.name}!",
+            $"BUILT {tierLabel} ON {targetTile.name}!{styleLabel}",
             $"Paid ${actualBuildCost} | New Rent: ${CalculateAuthenticRent(targetTile, 7)}"
         );
 
@@ -4825,7 +4990,7 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
-    void ConstructChronological3DBuilding(BoardTile tile)
+    void ConstructChronological3DBuilding(BoardTile tile, int chosenStyle = 0)
     {
         if (tile.spawnedBuilding != null) Destroy(tile.spawnedBuilding);
 
@@ -4849,8 +5014,19 @@ public class TycoonBoardManager : MonoBehaviour
             model = GameObject.CreatePrimitive(PrimitiveType.Cube);
             model.transform.SetParent(holder.transform, false);
             Destroy(model.GetComponent<Collider>());
-            model.GetComponent<Renderer>().material = CreateColoredMaterial(GetOfficialColor(tile), 0.85f);
+            Color baseColor = (chosenStyle == 1) ? new Color(0.95f, 0.82f, 0.5f) : GetOfficialColor(tile);
+            model.GetComponent<Renderer>().material = CreateColoredMaterial(baseColor, 0.85f);
         }
+
+        // Phase 21: Architectural lighting accent
+        GameObject accentLight = new GameObject("Architectural_AccentLight");
+        accentLight.transform.SetParent(holder.transform, false);
+        accentLight.transform.localPosition = new Vector3(0f, 0.08f, 0f);
+        Light l = accentLight.AddComponent<Light>();
+        l.type = LightType.Point;
+        l.range = 0.18f;
+        l.intensity = 1.2f;
+        l.color = (chosenStyle == 1) ? new Color(1f, 0.85f, 0.3f) : new Color(0.2f, 0.85f, 1f);
 
         tile.spawnedBuilding = holder;
         StartCoroutine(FitAndRiseBuildingChronological(holder.transform, model, tile.buildingLevel));
@@ -5446,8 +5622,13 @@ public class TycoonBoardManager : MonoBehaviour
         return gavelRoot;
     }
 
-    IEnumerator AnimateGavelStrike(GameObject gavel)
+    IEnumerator AnimateGavelStrike(GameObject gavel = null)
     {
+        if (gavel == null)
+        {
+            GameObject found = GameObject.Find("3D_Auction_Gavel");
+            if (found != null) gavel = found;
+        }
         if (gavel == null) yield break;
         Vector3 origPos = gavel.transform.localPosition;
         gavel.transform.localPosition = origPos + new Vector3(0f, -0.025f, 0f);
@@ -5526,6 +5707,7 @@ public class TycoonBoardManager : MonoBehaviour
                         timer = Mathf.Max(timer, 2.5f);
                         PlaySFX(cashRegisterSound, procCashClip, 1.2f);
                         StartCoroutine(AnimateGavelStrike(gavel));
+                        colocationAndPolish?.BroadcastAuctionBid(0, currentBid);
                         SetRivalReaction(1, AvatarMood.Neutral, $"You raised to ${currentBid}?! Let me calculate...");
                     }
                     else
@@ -5548,6 +5730,7 @@ public class TycoonBoardManager : MonoBehaviour
                         timer = Mathf.Max(timer, 2.5f);
                         PlaySFX(diceRollSound, procDiceClip, 1.2f);
                         StartCoroutine(AnimateGavelStrike(gavel));
+                        colocationAndPolish?.BroadcastAuctionBid(a, currentBid);
                         string taunt = (Random.value > 0.5f) ? $"{GetPlayerName(a)} bids ${currentBid}!" : $"Outbid! It's mine for ${currentBid}!";
                         SetRivalReaction(a, AvatarMood.HappyCheer, taunt);
                     }
@@ -5912,7 +6095,74 @@ public class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    private GameObject comfortVignetteSphere;
+    private Material comfortVignetteMaterial;
+
+    public void TriggerComfortVignetteTransition(System.Action teleportAction)
+    {
+        StartCoroutine(RunComfortVignetteRoutine(teleportAction));
+    }
+
+    private IEnumerator RunComfortVignetteRoutine(System.Action teleportAction)
+    {
+        Transform cam = Camera.main != null ? Camera.main.transform : null;
+        if (cam == null)
+        {
+            teleportAction?.Invoke();
+            yield break;
+        }
+
+        if (comfortVignetteSphere == null)
+        {
+            comfortVignetteSphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            comfortVignetteSphere.name = "VR_Comfort_Tunneling_Vignette";
+            Destroy(comfortVignetteSphere.GetComponent<Collider>());
+            comfortVignetteSphere.transform.localScale = Vector3.one * 0.45f;
+            comfortVignetteMaterial = CreateColoredMaterial(new Color(0.01f, 0.01f, 0.02f, 0f), 0.1f);
+            if (comfortVignetteMaterial.HasProperty("_Cull")) comfortVignetteMaterial.SetFloat("_Cull", 1f);
+            comfortVignetteSphere.GetComponent<Renderer>().material = comfortVignetteMaterial;
+        }
+
+        comfortVignetteSphere.SetActive(true);
+        comfortVignetteSphere.transform.position = cam.position;
+        comfortVignetteSphere.transform.SetParent(cam, true);
+
+        // 0.35s Comfort Vignette: 0.15s Fade In + 0.05s Teleport frame + 0.15s Fade Out
+        float elapsed = 0f;
+        while (elapsed < 0.15f)
+        {
+            elapsed += Time.deltaTime;
+            float alpha = Mathf.Clamp01(elapsed / 0.15f) * 0.98f;
+            if (comfortVignetteMaterial != null) comfortVignetteMaterial.color = new Color(0.01f, 0.01f, 0.02f, alpha);
+            yield return null;
+        }
+        if (comfortVignetteMaterial != null) comfortVignetteMaterial.color = new Color(0.01f, 0.01f, 0.02f, 0.98f);
+
+        teleportAction?.Invoke();
+        yield return new WaitForSeconds(0.05f);
+
+        elapsed = 0f;
+        while (elapsed < 0.15f)
+        {
+            elapsed += Time.deltaTime;
+            float alpha = (1f - Mathf.Clamp01(elapsed / 0.15f)) * 0.98f;
+            if (comfortVignetteMaterial != null) comfortVignetteMaterial.color = new Color(0.01f, 0.01f, 0.02f, alpha);
+            yield return null;
+        }
+
+        if (comfortVignetteSphere != null)
+        {
+            comfortVignetteSphere.transform.SetParent(null);
+            comfortVignetteSphere.SetActive(false);
+        }
+    }
+
     public void TogglePenthouseScaleShift()
+    {
+        TriggerComfortVignetteTransition(ExecutePenthouseScaleShift);
+    }
+
+    private void ExecutePenthouseScaleShift()
     {
         isInPenthouseVR = !isInPenthouseVR;
         isStandingOnRooftop = false;

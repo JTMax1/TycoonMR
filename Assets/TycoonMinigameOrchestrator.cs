@@ -614,6 +614,167 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
         onComplete?.Invoke(totalSavings);
     }
 
+    // =========================================================================
+    // 4. MINIGAME 4: "DEFENSIVE SABOTAGE — LASER-GRID HEIST"
+    // =========================================================================
+    public void RunLaserHeistSabotageMinigame(int baseRent, Action<int> onComplete)
+    {
+        if (isMinigameRunning) CancelActiveMinigame();
+        StartCoroutine(LaserHeistRoutine(baseRent, onComplete));
+    }
+
+    private IEnumerator LaserHeistRoutine(int baseRent, Action<int> onComplete)
+    {
+        isMinigameRunning = true;
+        var (spawnPos, spawnRot) = GetMinigameSpawnPose();
+
+        activeMinigameRoot = new GameObject("Laser_Heist_Minigame");
+        activeMinigameRoot.transform.position = spawnPos;
+        activeMinigameRoot.transform.rotation = spawnRot;
+
+        Material frameMat = boardManager.CreateColoredMaterial(new Color(0.12f, 0.14f, 0.18f), 0.9f, 0.3f);
+        Material laserMat = boardManager.CreateColoredMaterial(new Color(1f, 0.15f, 0.20f, 0.75f), 0.95f, 0.1f);
+        Material nodeGreenMat = boardManager.CreateColoredMaterial(new Color(0.18f, 0.95f, 0.45f), 0.95f, 0.7f);
+        Material nodeHackedMat = boardManager.CreateColoredMaterial(new Color(0.20f, 0.85f, 1f), 0.95f, 0.9f);
+        Material yellowMat = boardManager.CreateColoredMaterial(new Color(1f, 0.84f, 0.25f), 0.95f, 0.5f);
+
+        // Hologram UI Header
+        TextMeshProUGUI titleTMP = CreateHoloText(activeMinigameRoot.transform, "Title", new Vector3(0f, 0.18f, 0f), "DEFENSIVE SABOTAGE: LASER-GRID HEIST", 22f, new Color(1f, 0.35f, 0.35f));
+        TextMeshProUGUI timerTMP = CreateHoloText(activeMinigameRoot.transform, "Timer", new Vector3(0f, 0.135f, 0f), "TIME REMAINING: 8.0s", 18f, yellowMat.color);
+        TextMeshProUGUI promptTMP = CreateHoloText(activeMinigameRoot.transform, "Prompt", new Vector3(0f, -0.16f, 0f), "POKE 3 GREEN OVERRIDE NODES! AVOID THE SWEEPING RED LASER!", 15f, Color.white);
+
+        // Security Terminal Enclosure Frame
+        CreateBar(activeMinigameRoot.transform, new Vector3(0f, 0f, 0.015f), new Vector3(0.42f, 0.24f, 0.012f), frameMat);
+
+        // 3 Green Override Hacking Nodes
+        Vector3[] nodeLocalPositions = new Vector3[]
+        {
+            new Vector3(-0.13f, 0.02f, -0.015f),
+            new Vector3(0f, -0.04f, -0.015f),
+            new Vector3(0.13f, 0.035f, -0.015f)
+        };
+
+        GameObject[] nodes = new GameObject[3];
+        bool[] nodeHacked = new bool[3];
+        Renderer[] nodeRenderers = new Renderer[3];
+
+        for (int i = 0; i < 3; i++)
+        {
+            GameObject n = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            n.name = $"Override_Node_{i}";
+            n.transform.SetParent(activeMinigameRoot.transform, false);
+            n.transform.localPosition = nodeLocalPositions[i];
+            n.transform.localScale = Vector3.one * 0.045f;
+            nodeRenderers[i] = n.GetComponent<Renderer>();
+            nodeRenderers[i].material = nodeGreenMat;
+            nodes[i] = n;
+        }
+
+        // Sweeping Red Laser Beam
+        GameObject laserBeam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        laserBeam.name = "Sweeping_Laser_Beam";
+        laserBeam.transform.SetParent(activeMinigameRoot.transform, false);
+        laserBeam.transform.localPosition = new Vector3(0f, 0f, -0.018f);
+        laserBeam.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        laserBeam.transform.localScale = new Vector3(0.012f, 0.21f, 0.012f);
+        laserBeam.GetComponent<Renderer>().material = laserMat;
+        Destroy(laserBeam.GetComponent<Collider>());
+
+        boardManager.PlaySFX(boardManager.DiceRollSound, null, 1.4f);
+        boardManager.PlayHaptic(0.5f, 0.15f);
+
+        float timeLeft = 8.0f;
+        int hackedCount = 0;
+        float laserSpeed = 1.35f;
+
+        while (timeLeft > 0f)
+        {
+            timeLeft -= Time.deltaTime;
+            timerTMP.text = $"TIME: {timeLeft:F1}s | HACKED: {hackedCount}/3 (-{hackedCount * 20}% RENT)";
+
+            // Ping-pong sweep laser vertically between -0.08f and +0.08f
+            float laserY = Mathf.PingPong(Time.time * laserSpeed, 0.16f) - 0.08f;
+            laserBeam.transform.localPosition = new Vector3(0f, laserY, -0.018f);
+
+            Vector3 lPos = boardManager.LeftHandWorldPos;
+            Vector3 rPos = boardManager.RightHandWorldPos;
+            bool lTracked = boardManager.IsLeftHandTracked && lPos.y > -50f;
+            bool rTracked = boardManager.IsRightHandTracked && rPos.y > -50f;
+
+            // Check if hand intersects laser beam
+            Vector3 laserWorldPos = laserBeam.transform.position;
+            float distLeftToLaser = lTracked ? Mathf.Abs(lPos.y - laserWorldPos.y) : 99f;
+            float distRightToLaser = rTracked ? Mathf.Abs(rPos.y - laserWorldPos.y) : 99f;
+            bool laserTripped = (distLeftToLaser < 0.022f && Vector3.Distance(lPos, laserWorldPos) < 0.22f) ||
+                                (distRightToLaser < 0.022f && Vector3.Distance(rPos, laserWorldPos) < 0.22f);
+
+            if (laserTripped && hackedCount > 0)
+            {
+                // Trip alarm! Flash red, buzz haptic, reset 1 hacked node
+                boardManager.PlaySFX(boardManager.TokenMoveSound, null, 0.65f);
+                boardManager.PlayHaptic(0.7f, 0.15f);
+                promptTMP.text = "<color=#FF4444>SECURITY ALARM TRIPPED! LASER BEAM BREACHED!</color>";
+                promptTMP.color = Color.red;
+
+                for (int i = 2; i >= 0; i--)
+                {
+                    if (nodeHacked[i])
+                    {
+                        nodeHacked[i] = false;
+                        nodeRenderers[i].material = nodeGreenMat;
+                        hackedCount--;
+                        break;
+                    }
+                }
+            }
+
+            // Check poke on green nodes
+            for (int i = 0; i < 3; i++)
+            {
+                if (nodeHacked[i]) continue;
+                Collider nCol = nodes[i].GetComponent<Collider>();
+                if (nCol == null) continue;
+
+                bool lHit = lTracked && Vector3.Distance(nCol.ClosestPoint(lPos), lPos) < 0.028f;
+                bool rHit = rTracked && Vector3.Distance(nCol.ClosestPoint(rPos), rPos) < 0.028f;
+                bool keyboardTest = UnityEngine.InputSystem.Keyboard.current != null &&
+                    ((i == 0 && UnityEngine.InputSystem.Keyboard.current.digit1Key.wasPressedThisFrame) ||
+                     (i == 1 && UnityEngine.InputSystem.Keyboard.current.digit2Key.wasPressedThisFrame) ||
+                     (i == 2 && UnityEngine.InputSystem.Keyboard.current.digit3Key.wasPressedThisFrame));
+
+                if (lHit || rHit || keyboardTest)
+                {
+                    nodeHacked[i] = true;
+                    nodeRenderers[i].material = nodeHackedMat;
+                    hackedCount++;
+                    boardManager.PlaySFX(boardManager.CashRegisterSound, null, 1.2f + (hackedCount * 0.15f));
+                    boardManager.PlayHaptic(0.6f, 0.1f);
+                    promptTMP.text = $"<color=#00FF88>NODE {i + 1} OVERRIDDEN! -{hackedCount * 20}% DISCOUNT!</color>";
+                    promptTMP.color = Color.green;
+                }
+            }
+
+            if (hackedCount >= 3) break;
+            yield return null;
+        }
+
+        int discountPercent = hackedCount * 20;
+        int finalRent = Mathf.Max(10, Mathf.RoundToInt(baseRent * (1f - (discountPercent / 100f))));
+        int savedCash = baseRent - finalRent;
+
+        titleTMP.text = $"HEIST COMPLETE! -{discountPercent}% RENT DISCOUNT";
+        titleTMP.color = new Color(0.2f, 1f, 0.4f);
+        timerTMP.text = $"BASE: ${baseRent} ➔ DISCOUNTED RENT: ${finalRent}";
+        promptTMP.text = $"Bypassed {hackedCount}/3 security nodes! Slashed ${savedCash} off rival's rent bill!";
+
+        boardManager.PlaySFX(boardManager.CashRegisterSound, null, 1.35f);
+        boardManager.PlayHaptic(0.85f, 0.25f);
+        yield return new WaitForSeconds(1.35f);
+
+        CancelActiveMinigame();
+        onComplete?.Invoke(finalRent);
+    }
+
     public void CancelActiveMinigame()
     {
         if (activeMinigameRoot != null)
