@@ -213,13 +213,18 @@ public partial class TycoonBoardManager : MonoBehaviour
     {
         if (isBankrupt != null && seat >= 0 && seat < isBankrupt.Length) isBankrupt[seat] = bankrupt;
     }
-    public void SetCurrentState(TurnState state) => currentState = state;
+    public void SetCurrentState(TurnState state)
+    {
+        currentState = state;
+        isHudDirty = true;
+    }
     public void SetCurrentTurnPlayer(int seat)
     {
         CurrentTurnPlayer = seat;
         OnTurnStarted?.Invoke(seat);
     }
     public bool IsNetworkStateSyncAuthorized => enableNetworkStateSync;
+    public void CreateStartMenuForTest() => Create3DHolographicStartMenu();
 
     public int[] GetPlayerCashArray() => (int[])playerCash.Clone();
     public int[] GetPlayerPosArray() => (int[])playerPos.Clone();
@@ -430,6 +435,8 @@ public partial class TycoonBoardManager : MonoBehaviour
     private bool spacePressed = false;
     private bool buyPressed = false;
     private bool passPressed = false;
+    private bool isHudDirty = true;
+    public void MarkHudDirty() => isHudDirty = true;
 
     private bool isTwoHandManipulating = false;
     private float initialTwoHandDistance = 0.3f;
@@ -1106,7 +1113,12 @@ public partial class TycoonBoardManager : MonoBehaviour
         if (moodPressed) ToggleMarketAtmosphere();
         if (vrViewPressed) TogglePenthouseScaleShift();
 
-        UpdateLiveHUDStats();
+        if (isHudDirty)
+        {
+            isHudDirty = false;
+            UpdateLiveHUDStats();
+            UpdateContextualActionButtons();
+        }
     }
 
     void CreateFloatingVRControls()
@@ -1853,15 +1865,15 @@ public partial class TycoonBoardManager : MonoBehaviour
 
         startMenuHolder = new GameObject("Executive_Start_Menu");
         startMenuHolder.transform.SetParent(transform, false);
-        startMenuHolder.transform.localPosition = new Vector3(0f, 0.35f, -0.15f);
-        startMenuHolder.transform.localRotation = Quaternion.Euler(14f, 0f, 0f);
+        startMenuHolder.transform.localPosition = new Vector3(0f, 0.08f, -(boardSize * 0.5f) - 0.08f);
+        startMenuHolder.transform.localRotation = Quaternion.Euler(38f, 0f, 0f);
 
         GameObject bg = GameObject.CreatePrimitive(PrimitiveType.Cube);
         bg.name = "StartMenu_Backdrop";
         bg.transform.SetParent(startMenuHolder.transform, false);
         bg.transform.localPosition = Vector3.zero;
         bg.transform.localRotation = Quaternion.identity;
-        bg.transform.localScale = new Vector3(0.54f, 0.43f, 0.012f);
+        bg.transform.localScale = new Vector3(0.38f, 0.28f, 0.010f);
         Destroy(bg.GetComponent<Collider>());
         bg.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.04f, 0.07f, 0.14f), 0.92f);
 
@@ -1870,15 +1882,15 @@ public partial class TycoonBoardManager : MonoBehaviour
         border.transform.SetParent(startMenuHolder.transform, false);
         border.transform.localPosition = new Vector3(0f, 0f, 0.002f);
         border.transform.localRotation = Quaternion.identity;
-        border.transform.localScale = new Vector3(0.548f, 0.438f, 0.008f);
+        border.transform.localScale = new Vector3(0.386f, 0.286f, 0.008f);
         Destroy(border.GetComponent<Collider>());
         border.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.45f);
 
         GameObject headerCanvasGO = new GameObject("StartMenu_HeaderCanvas");
         headerCanvasGO.transform.SetParent(startMenuHolder.transform, false);
-        headerCanvasGO.transform.localPosition = new Vector3(0f, 0.165f, -0.015f);
+        headerCanvasGO.transform.localPosition = new Vector3(0f, 0.108f, -0.015f);
         headerCanvasGO.transform.localRotation = Quaternion.identity;
-        headerCanvasGO.transform.localScale = Vector3.one * 0.00065f;
+        headerCanvasGO.transform.localScale = Vector3.one * 0.00045f;
         Canvas hc = headerCanvasGO.AddComponent<Canvas>();
         hc.renderMode = RenderMode.WorldSpace;
         RectTransform hrt = headerCanvasGO.GetComponent<RectTransform>();
@@ -1887,11 +1899,11 @@ public partial class TycoonBoardManager : MonoBehaviour
         GameObject headerTxtGO = new GameObject("HeaderTitle");
         headerTxtGO.transform.SetParent(headerCanvasGO.transform, false);
         TextMeshProUGUI headerTMP = headerTxtGO.AddComponent<TextMeshProUGUI>();
-        headerTMP.text = "<color=#FFD700><b>TYCOON METROPOLIS</b></color>\n<size=22><color=#66DDFF>EXECUTIVE BOARDROOM MATCH SETUP</color></size>";
+        headerTMP.text = "<color=#FFD700><b>TYCOON METROPOLIS</b></color>\n<size=20><color=#66DDFF>EXECUTIVE MATCH SETUP</color></size>";
         headerTMP.alignment = TextAlignmentOptions.Center;
         headerTMP.rectTransform.sizeDelta = new Vector2(760f, 100f);
 
-        float[] yPositions = { 0.095f, 0.040f, -0.015f, -0.070f, -0.135f };
+        float[] yPositions = { 0.062f, 0.022f, -0.018f, -0.058f, -0.102f };
         Color[] btnColors = {
             new Color(0.12f, 0.65f, 0.85f), // Cyan Blue (Mode)
             new Color(0.18f, 0.45f, 0.85f), // Slate Blue (Rivals)
@@ -1906,7 +1918,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             btnCube.name = $"StartMenu_Btn_{i}";
             btnCube.transform.SetParent(startMenuHolder.transform, false);
             btnCube.transform.localPosition = new Vector3(0f, yPositions[i], -0.010f);
-            btnCube.transform.localScale = new Vector3(0.48f, 0.044f, 0.018f);
+            btnCube.transform.localScale = new Vector3(0.34f, 0.034f, 0.015f);
 
             BoxCollider col = btnCube.GetComponent<BoxCollider>();
             if (col != null) col.isTrigger = true;
@@ -1915,9 +1927,9 @@ public partial class TycoonBoardManager : MonoBehaviour
 
             GameObject btnCanvasGO = new GameObject($"StartMenu_Btn_Canvas_{i}");
             btnCanvasGO.transform.SetParent(startMenuHolder.transform, false);
-            btnCanvasGO.transform.localPosition = new Vector3(0f, yPositions[i], -0.024f);
+            btnCanvasGO.transform.localPosition = new Vector3(0f, yPositions[i], -0.020f);
             btnCanvasGO.transform.localRotation = Quaternion.identity;
-            btnCanvasGO.transform.localScale = Vector3.one * 0.00065f;
+            btnCanvasGO.transform.localScale = Vector3.one * 0.00045f;
 
             Canvas bc = btnCanvasGO.AddComponent<Canvas>();
             bc.renderMode = RenderMode.WorldSpace;
@@ -1927,7 +1939,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             GameObject txtGO = new GameObject("Text");
             txtGO.transform.SetParent(btnCanvasGO.transform, false);
             TextMeshProUGUI tmp = txtGO.AddComponent<TextMeshProUGUI>();
-            tmp.fontSize = 26;
+            tmp.fontSize = 24;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
@@ -2368,6 +2380,22 @@ public partial class TycoonBoardManager : MonoBehaviour
         return $"MONOPOLIES: {monopolies} | NEAR SET: {nearSetText}";
     }
 
+    void UpdateContextualActionButtons()
+    {
+        if (buttonTransforms == null || buttonTransforms.Length < 10) return;
+
+        bool canRoll = (currentState == TurnState.WaitingForRoll);
+        bool canBuyPass = (currentState == TurnState.BuyOrPassDecision);
+        bool canAuction = (currentState == TurnState.AuctionInProgress);
+        bool canBuild = (currentState == TurnState.WaitingForRoll || currentState == TurnState.BuyOrPassDecision);
+
+        if (buttonTransforms[0] != null) buttonTransforms[0].gameObject.SetActive(canRoll || canAuction);
+        if (buttonTransforms[1] != null) buttonTransforms[1].gameObject.SetActive(canBuyPass || canAuction);
+        if (buttonTransforms[2] != null) buttonTransforms[2].gameObject.SetActive(canBuyPass || canAuction);
+        if (buttonTransforms[3] != null) buttonTransforms[3].gameObject.SetActive(canBuild);
+        if (buttonTransforms[4] != null) buttonTransforms[4].gameObject.SetActive(canBuild);
+    }
+
     void UpdateLiveHUDStats()
     {
         if (dashboardStatsTMP == null) return;
@@ -2382,10 +2410,11 @@ public partial class TycoonBoardManager : MonoBehaviour
             default: cycleBadge = "MARKET: STANDARD"; break;
         }
 
-        string statsLine = $"YOU: ${playerCash[0]} (NET: ${net0})";
+        string p0Name = (!isPassAndPlayMode) ? "YOU" : GetPlayerName(0).ToUpper();
+        string statsLine = $"{p0Name}: ${playerCash[0]} (NET: ${net0})";
         for (int p = 1; p < activePlayerCount; p++)
         {
-            string shortName = (p == 1) ? "ALPHA" : (p == 2 ? "BETA" : "GAMMA");
+            string shortName = GetPlayerName(p).ToUpper();
             int net = CalculatePlayerNetWorth(p);
             if (isBankrupt[p]) statsLine += $" | {shortName}: [OUT]";
             else statsLine += $" | {shortName}: ${playerCash[p]} (NET: ${net})";
@@ -2398,10 +2427,11 @@ public partial class TycoonBoardManager : MonoBehaviour
     {
         if (dashboardTitleTMP != null)
         {
-            string titleStr = $"YOU: ${playerCash[0]}";
+            string p0Name = (!isPassAndPlayMode) ? "YOU" : GetPlayerName(0).ToUpper();
+            string titleStr = $"{p0Name}: ${playerCash[0]}";
             for (int p = 1; p < activePlayerCount; p++)
             {
-                string shortName = (p == 1) ? "ALPHA" : (p == 2 ? "BETA" : "GAMMA");
+                string shortName = GetPlayerName(p).ToUpper();
                 titleStr += isBankrupt[p] ? $" | {shortName}: [OUT]" : $" | {shortName}: ${playerCash[p]}";
             }
             titleStr += $" | JACKPOT: ${freeParkingJackpot}";
