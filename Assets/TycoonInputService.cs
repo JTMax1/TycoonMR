@@ -42,6 +42,8 @@ public partial class TycoonBoardManager
         isLeftPinching = false;
         isLeftHandTracked = false;
         isRightHandTracked = false;
+        isLeftHandGrabbing = false;
+        isRightHandGrabbing = false;
         leftHandWorldPos = new Vector3(0f, -100f, 0f);
         rightHandWorldPos = new Vector3(0f, -100f, 0f);
 
@@ -107,6 +109,8 @@ public partial class TycoonBoardManager
 
                 bool pinching = hand.GetFingerIsPinching(OVRHand.HandFinger.Index) ||
                                 hand.GetFingerPinchStrength(OVRHand.HandFinger.Index) > 0.65f;
+                bool grabbing = hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
+                                hand.GetFingerPinchStrength(OVRHand.HandFinger.Middle) > 0.55f;
 
                 Vector3 ptrPos = hand.PointerPose != null ? hand.PointerPose.position : hand.transform.position;
                 int handedness = DetermineHierarchyHandedness(hand.transform);
@@ -120,12 +124,14 @@ public partial class TycoonBoardManager
                 {
                     isLeftHandTracked = true;
                     isLeftPinching |= pinching;
+                    isLeftHandGrabbing |= grabbing;
                     if (leftHandWorldPos.y < -50f) leftHandWorldPos = ptrPos;
                 }
                 else if (handedness == 1)
                 {
                     isRightHandTracked = true;
                     isRightPinching |= pinching;
+                    isRightHandGrabbing |= grabbing;
                     if (rightHandWorldPos.y < -50f) rightHandWorldPos = ptrPos;
                 }
             }
@@ -193,16 +199,23 @@ public partial class TycoonBoardManager
                         }
                     }
                 }
+                // Trigger is Pinch / Pointer Select
                 var rTrig = rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerPressed") 
                          ?? rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerButton");
                 if (rTrig != null && rTrig.isPressed) rControllerPinchNew = true;
 
+                // Grip is Grab (separated from index pinch)
                 var rGrip = rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripPressed")
                          ?? rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripButton");
-                if (rGrip != null && rGrip.isPressed) rControllerPinchNew = true;
+                if (rGrip != null && rGrip.isPressed) isRightHandGrabbing = true;
 
+                // Primary button (A): Confirm / Roll
                 var rBtn = rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("primaryButton");
-                if (rBtn != null && rBtn.isPressed) rControllerPinchNew = true;
+                if (rBtn != null && rBtn.wasPressedThisFrame) spacePressed = true;
+
+                // Secondary button (B): Pass / Cancel
+                var rBtn2 = rXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("secondaryButton");
+                if (rBtn2 != null && rBtn2.wasPressedThisFrame) passPressed = true;
             }
             catch { }
         }
@@ -224,16 +237,23 @@ public partial class TycoonBoardManager
                         }
                     }
                 }
+                // Trigger is Pinch / Pointer Select
                 var lTrig = lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerPressed") 
                          ?? lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("triggerButton");
                 if (lTrig != null && lTrig.isPressed) lControllerPinchNew = true;
 
+                // Grip is Grab (separated from index pinch)
                 var lGrip = lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripPressed")
                          ?? lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("gripButton");
-                if (lGrip != null && lGrip.isPressed) lControllerPinchNew = true;
+                if (lGrip != null && lGrip.isPressed) isLeftHandGrabbing = true;
 
+                // Primary button (X): Buy
                 var lBtn = lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("primaryButton");
-                if (lBtn != null && lBtn.isPressed) lControllerPinchNew = true;
+                if (lBtn != null && lBtn.wasPressedThisFrame) buyPressed = true;
+
+                // Secondary button (Y): Pass / Cancel
+                var lBtn2 = lXR.GetChildControl<UnityEngine.InputSystem.Controls.ButtonControl>("secondaryButton");
+                if (lBtn2 != null && lBtn2.wasPressedThisFrame) passPressed = true;
             }
             catch { }
         }
@@ -256,10 +276,14 @@ public partial class TycoonBoardManager
                         rightHandWorldPos = refSpace.TransformPoint(ctrlLocal);
                     }
 
-                    bool rControllerPinch = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) ||
-                                            OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch) ||
-                                            OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch);
-                    isRightPinching |= rControllerPinch;
+                    bool rTrig = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch);
+                    isRightPinching |= rTrig;
+
+                    bool rGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
+                    isRightHandGrabbing |= rGrip;
+
+                    if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch)) spacePressed = true;
+                    if (OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) passPressed = true;
                 }
 
                 bool lTouchConnected = OVRInput.IsControllerConnected(OVRInput.Controller.LTouch);
@@ -272,10 +296,14 @@ public partial class TycoonBoardManager
                         leftHandWorldPos = refSpace.TransformPoint(ctrlLocal);
                     }
 
-                    bool lControllerPinch = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch) ||
-                                            OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch) ||
-                                            OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch);
-                    isLeftPinching |= lControllerPinch;
+                    bool lTrig = OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
+                    isLeftPinching |= lTrig;
+
+                    bool lGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch);
+                    isLeftHandGrabbing |= lGrip;
+
+                    if (OVRInput.GetDown(OVRInput.Button.Three, OVRInput.Controller.LTouch)) buyPressed = true;
+                    if (OVRInput.GetDown(OVRInput.Button.Four, OVRInput.Controller.LTouch)) passPressed = true;
                 }
             }
             catch { }
@@ -368,17 +396,20 @@ public partial class TycoonBoardManager
                 return;
             }
 
-            if (rPinchDown || lPinchDown)
+            bool rightAction = rPinchDown || isRightHandGrabbing;
+            bool leftAction = lPinchDown || isLeftHandGrabbing;
+
+            if (rightAction || leftAction)
             {
                 float distR = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(rightHandWorldPos, die1Transform.position) : 99f;
                 float distL = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(leftHandWorldPos, die1Transform.position) : 99f;
 
                 bool grabRight;
-                if (rPinchDown && lPinchDown)
+                if (rightAction && leftAction)
                 {
                     grabRight = (distR <= distL);
                 }
-                else if (rPinchDown)
+                else if (rightAction)
                 {
                     grabRight = true;
                 }
@@ -412,10 +443,10 @@ public partial class TycoonBoardManager
                 activeHandGrabTransform.position = lockedHandPos;
             }
 
-            bool grabbingHandPinching = isGrabbingDiceWithRight ? rPinchHeld : lPinchHeld;
+            bool grabbingHandHolding = isGrabbingDiceWithRight ? (rPinchHeld || isRightHandGrabbing) : (lPinchHeld || isLeftHandGrabbing);
             bool grabbingHandTracked = isGrabbingDiceWithRight ? isRightHandTracked : isLeftHandTracked;
 
-            if (!grabbingHandPinching || (!grabbingHandTracked && !rPinchHeld && !lPinchHeld))
+            if (!grabbingHandHolding || (!grabbingHandTracked && !rPinchHeld && !lPinchHeld && !isRightHandGrabbing && !isLeftHandGrabbing))
             {
                 isPlayerHoldingDice = false;
                 StartCoroutine(ExecutePhysicsDiceRollTurn(false));
@@ -481,22 +512,33 @@ public partial class TycoonBoardManager
         if (Time.time < lastButtonTouchTime) return -1;
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
+        int closestIdx = -1;
+        float minContactDist = 0.024f;
+
         for (int i = 0; i < buttonTransforms.Length; i++)
         {
             if (buttonTransforms[i] == null) continue;
             Collider btnCol = buttonTransforms[i].GetComponent<Collider>();
             if (btnCol == null) continue;
 
-            bool rightPoked = isRightHandTracked && Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
-            bool leftPoked = isLeftHandTracked && Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+            float dRight = isRightHandTracked ? Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
+            float dLeft = isLeftHandTracked ? Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dMin = Mathf.Min(dRight, dLeft);
 
-            if (rightPoked || leftPoked)
+            if (dMin < minContactDist)
             {
-                lastButtonTouchTime = Time.time + 0.50f;
-                StartCoroutine(AnimateButtonPress(buttonTransforms[i]));
-                return i;
+                minContactDist = dMin;
+                closestIdx = i;
             }
         }
+
+        if (closestIdx >= 0)
+        {
+            lastButtonTouchTime = Time.time + 0.40f;
+            StartCoroutine(AnimateButtonPress(buttonTransforms[closestIdx]));
+            return closestIdx;
+        }
+
         return -1;
     }
 
@@ -505,21 +547,32 @@ public partial class TycoonBoardManager
         if (Time.time < lastTilePokeTime) return -1;
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
+        int closestTile = -1;
+        float minContactDist = 0.026f;
+
         for (int i = 0; i < 40; i++)
         {
             if (board[i] == null || board[i].tileTransform == null) continue;
             Collider col = board[i].tileTransform.GetComponent<Collider>();
             if (col == null) continue;
 
-            bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
-            bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+            float dRight = (isRightHandTracked && rightHandWorldPos.y > -50f) ? Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
+            float dLeft = (isLeftHandTracked && leftHandWorldPos.y > -50f) ? Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dMin = Mathf.Min(dRight, dLeft);
 
-            if (rightPoked || leftPoked)
+            if (dMin < minContactDist)
             {
-                lastTilePokeTime = Time.time + 0.50f;
-                return i;
+                minContactDist = dMin;
+                closestTile = i;
             }
         }
+
+        if (closestTile >= 0)
+        {
+            lastTilePokeTime = Time.time + 0.35f;
+            return closestTile;
+        }
+
         return -1;
     }
 
@@ -532,12 +585,12 @@ public partial class TycoonBoardManager
         Collider col = mortgageButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.50f;
+            lastButtonTouchTime = Time.time + 0.45f;
             StartCoroutine(AnimateButtonPress(mortgageButtonTransform));
             return true;
         }
@@ -553,12 +606,12 @@ public partial class TycoonBoardManager
         Collider col = upgradeCardButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.50f;
+            lastButtonTouchTime = Time.time + 0.45f;
             StartCoroutine(AnimateButtonPress(upgradeCardButtonTransform));
             return true;
         }
@@ -574,12 +627,12 @@ public partial class TycoonBoardManager
         Collider col = offerDealButtonTransform.GetComponent<Collider>();
         if (col == null) return false;
 
-        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.018f;
-        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.018f;
+        bool rightPoked = isRightHandTracked && rightHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.024f;
+        bool leftPoked = isLeftHandTracked && leftHandWorldPos.y > -50f && Vector3.Distance(col.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.024f;
 
         if (rightPoked || leftPoked)
         {
-            lastButtonTouchTime = Time.time + 0.50f;
+            lastButtonTouchTime = Time.time + 0.45f;
             StartCoroutine(AnimateButtonPress(offerDealButtonTransform));
             return true;
         }
@@ -591,22 +644,33 @@ public partial class TycoonBoardManager
         if (Time.time < lastButtonTouchTime) return -1;
         if (!isRightHandTracked && !isLeftHandTracked) return -1;
 
+        int closestIdx = -1;
+        float minContactDist = 0.028f;
+
         for (int i = 0; i < startMenuButtonTransforms.Length; i++)
         {
             if (startMenuButtonTransforms[i] == null) continue;
             Collider btnCol = startMenuButtonTransforms[i].GetComponent<Collider>();
             if (btnCol == null) continue;
 
-            bool rightPoked = isRightHandTracked && Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) < 0.022f;
-            bool leftPoked = isLeftHandTracked && Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) < 0.022f;
+            float dRight = isRightHandTracked ? Vector3.Distance(btnCol.ClosestPoint(rightHandWorldPos), rightHandWorldPos) : float.MaxValue;
+            float dLeft = isLeftHandTracked ? Vector3.Distance(btnCol.ClosestPoint(leftHandWorldPos), leftHandWorldPos) : float.MaxValue;
+            float dMin = Mathf.Min(dRight, dLeft);
 
-            if (rightPoked || leftPoked)
+            if (dMin < minContactDist)
             {
-                lastButtonTouchTime = Time.time + 0.40f;
-                StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[i]));
-                return i;
+                minContactDist = dMin;
+                closestIdx = i;
             }
         }
+
+        if (closestIdx >= 0)
+        {
+            lastButtonTouchTime = Time.time + 0.40f;
+            StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[closestIdx]));
+            return closestIdx;
+        }
+
         return -1;
     }
 

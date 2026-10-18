@@ -143,6 +143,8 @@ public partial class TycoonBoardManager : MonoBehaviour
     public Vector3 RightHandWorldPos => rightHandWorldPos;
     public bool IsLeftHandTracked => isLeftHandTracked;
     public bool IsRightHandTracked => isRightHandTracked;
+    public bool IsLeftHandGrabbing => isLeftHandGrabbing;
+    public bool IsRightHandGrabbing => isRightHandGrabbing;
     public Transform Die1Transform => die1Transform;
     public Transform Die2Transform => die2Transform;
     public PhysicalThrowDie PhysDie1 => physDie1;
@@ -198,6 +200,26 @@ public partial class TycoonBoardManager : MonoBehaviour
     public bool CheckAllRivalsBankruptPublic() => CheckAllRivalsBankrupt();
     public void TriggerVictoryTrophy() => OnVictoryTrophyTriggered?.Invoke();
     public void NotifyGameStateModified() => OnGameStateModified?.Invoke();
+
+    public void SetCurrentMatchMode(MatchMultiplayerMode mode)
+    {
+        currentMatchMode = mode;
+        isPassAndPlayMode = (mode == MatchMultiplayerMode.PassAndPlay);
+    }
+    public MatchMultiplayerMode CurrentMatchMode => currentMatchMode;
+    public void SetActivePlayerCount(int count) => activePlayerCount = count;
+    public int ActivePlayerCount => activePlayerCount;
+    public void SetPlayerBankrupt(int seat, bool bankrupt)
+    {
+        if (isBankrupt != null && seat >= 0 && seat < isBankrupt.Length) isBankrupt[seat] = bankrupt;
+    }
+    public void SetCurrentState(TurnState state) => currentState = state;
+    public void SetCurrentTurnPlayer(int seat)
+    {
+        CurrentTurnPlayer = seat;
+        OnTurnStarted?.Invoke(seat);
+    }
+    public bool IsNetworkStateSyncAuthorized => enableNetworkStateSync;
 
     public int[] GetPlayerCashArray() => (int[])playerCash.Clone();
     public int[] GetPlayerPosArray() => (int[])playerPos.Clone();
@@ -403,6 +425,11 @@ public partial class TycoonBoardManager : MonoBehaviour
     private Vector3 rightHandWorldPos = new Vector3(0f, -100f, 0f);
     private bool isLeftHandTracked = false;
     private bool isRightHandTracked = false;
+    private bool isLeftHandGrabbing = false;
+    private bool isRightHandGrabbing = false;
+    private bool spacePressed = false;
+    private bool buyPressed = false;
+    private bool passPressed = false;
 
     private bool isTwoHandManipulating = false;
     private float initialTwoHandDistance = 0.3f;
@@ -781,9 +808,9 @@ public partial class TycoonBoardManager : MonoBehaviour
         AnimateRivalMogulAvatar();
         AnimateFloatingDeedCrystal();
 
-        bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-        bool buyPressed = Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame;
-        bool passPressed = Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame;
+        spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+        buyPressed = Keyboard.current != null && Keyboard.current.bKey.wasPressedThisFrame;
+        passPressed = Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame;
         bool upgradePressed = Keyboard.current != null && Keyboard.current.uKey.wasPressedThisFrame;
         bool takeoverPressed = Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
         bool moodPressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;

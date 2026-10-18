@@ -32,8 +32,8 @@ public class Phase3ModeTests
     [Test]
     public void Test_SoloVsAI_PlayerSeatRoles()
     {
-        boardManager.selectedGameMode = TycoonBoardManager.GameMode.SoloVsAI;
-        boardManager.activePlayerCount = 4;
+        boardManager.SetCurrentMatchMode(TycoonBoardManager.MatchMultiplayerMode.VsAIMoguls);
+        boardManager.SetActivePlayerCount(4);
 
         Assert.IsTrue(boardManager.IsHumanPlayer(0), "Seat 0 must be human in SoloVsAI mode");
         Assert.IsFalse(boardManager.IsHumanPlayer(1), "Seat 1 must be AI in SoloVsAI mode");
@@ -44,8 +44,8 @@ public class Phase3ModeTests
     [Test]
     public void Test_PassAndPlay_AllActiveSeatsAreHuman()
     {
-        boardManager.selectedGameMode = TycoonBoardManager.GameMode.PassAndPlay;
-        boardManager.activePlayerCount = 4;
+        boardManager.SetCurrentMatchMode(TycoonBoardManager.MatchMultiplayerMode.PassAndPlay);
+        boardManager.SetActivePlayerCount(4);
 
         for (int i = 0; i < 4; i++)
         {
@@ -56,24 +56,24 @@ public class Phase3ModeTests
     [Test]
     public void Test_TurnState_HandoverStateExistsAndTransitions()
     {
-        boardManager.CurrentState = TycoonBoardManager.TurnState.Handover;
+        boardManager.SetCurrentState(TycoonBoardManager.TurnState.Handover);
         Assert.AreEqual(TycoonBoardManager.TurnState.Handover, boardManager.CurrentState, "CurrentState should support Handover");
 
-        boardManager.CurrentState = TycoonBoardManager.TurnState.WaitingForRoll;
+        boardManager.SetCurrentState(TycoonBoardManager.TurnState.WaitingForRoll);
         Assert.AreEqual(TycoonBoardManager.TurnState.WaitingForRoll, boardManager.CurrentState, "CurrentState should transition from Handover to WaitingForRoll");
     }
 
     [Test]
     public void Test_GetRemainingActivePlayerCount_TracksBankruptcy()
     {
-        boardManager.activePlayerCount = 4;
+        boardManager.SetActivePlayerCount(4);
         Assert.AreEqual(4, boardManager.GetRemainingActivePlayerCount(), "Initial active player count should be 4");
 
-        boardManager.isBankrupt[1] = true;
+        boardManager.SetPlayerBankrupt(1, true);
         Assert.AreEqual(3, boardManager.GetRemainingActivePlayerCount(), "Active player count should be 3 after 1 bankruptcy");
 
-        boardManager.isBankrupt[2] = true;
-        boardManager.isBankrupt[3] = true;
+        boardManager.SetPlayerBankrupt(2, true);
+        boardManager.SetPlayerBankrupt(3, true);
         Assert.AreEqual(1, boardManager.GetRemainingActivePlayerCount(), "Active player count should be 1 after 3 bankruptcies");
     }
 
@@ -83,21 +83,18 @@ public class Phase3ModeTests
         int receivedSeat = -1;
         boardManager.OnTurnStarted += (seat) => { receivedSeat = seat; };
 
-        boardManager.CurrentTurnPlayer = 2;
+        boardManager.SetCurrentTurnPlayer(2);
         Assert.AreEqual(2, boardManager.CurrentTurnPlayer, "CurrentTurnPlayer property must store seat 2");
-        
-        boardManager.OnTurnStarted?.Invoke(boardManager.CurrentTurnPlayer);
         Assert.AreEqual(2, receivedSeat, "OnTurnStarted event must fire with current turn player seat index");
     }
 
     [Test]
     public void Test_NetworkModes_GatedUntilPhase7NGO()
     {
-        boardManager.selectedGameMode = TycoonBoardManager.GameMode.LocalColocation;
-        boardManager.LaunchSelectedGameMode();
+        boardManager.SetCurrentMatchMode(TycoonBoardManager.MatchMultiplayerMode.LocalWiFiColocation);
 
         // In Phase 3, network modes must remain gated without corrupting local state
-        Assert.IsFalse(boardManager.isNetworkStateSyncAuthorized, "Network state sync must remain unauthorized when launching gated network mode");
+        Assert.IsFalse(boardManager.IsNetworkStateSyncAuthorized, "Network state sync must remain unauthorized when launching gated network mode");
     }
 
 #if UNITY_EDITOR
@@ -115,7 +112,7 @@ public class Phase3ModeTests
             testInstance.Test_TurnState_HandoverStateExistsAndTransitions,
             testInstance.Test_GetRemainingActivePlayerCount_TracksBankruptcy,
             testInstance.Test_CurrentTurnPlayer_SeatIdentity,
-            testInstance.Test_NetworkModes_GatedUntilPhase7
+            testInstance.Test_NetworkModes_GatedUntilPhase7NGO
         };
 
         foreach (var test in testMethods)

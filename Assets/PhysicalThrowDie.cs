@@ -159,6 +159,41 @@ public class PhysicalThrowDie : MonoBehaviour
         if (isRolling && !rb.isKinematic)
         {
             rb.AddForce(Physics.gravity * (extraGravityMultiplier - 1f), ForceMode.Acceleration);
+
+            // Bounded physics containment within courtyard (-0.30m to +0.30m relative to board)
+            Vector3 localPos = transform.localPosition;
+            
+            // Soft inward physics restoring force if drifting outside courtyard boundary
+            if (Mathf.Abs(localPos.x) > 0.26f)
+            {
+                float sign = -Mathf.Sign(localPos.x);
+                Vector3 inwardDir = transform.parent != null ? transform.parent.TransformDirection(Vector3.right * sign) : Vector3.right * sign;
+                rb.AddForce(inwardDir * 6.5f, ForceMode.Acceleration);
+            }
+            if (Mathf.Abs(localPos.z) > 0.26f)
+            {
+                float sign = -Mathf.Sign(localPos.z);
+                Vector3 inwardDir = transform.parent != null ? transform.parent.TransformDirection(Vector3.forward * sign) : Vector3.forward * sign;
+                rb.AddForce(inwardDir * 6.5f, ForceMode.Acceleration);
+            }
+
+            // Fall-through recovery: if die somehow falls below board plane
+            if (localPos.y < -0.15f || Mathf.Abs(localPos.x) > 0.70f || Mathf.Abs(localPos.z) > 0.70f)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                transform.localPosition = spawnLocalPos + Vector3.up * 0.08f;
+            }
+
+            rollTimer += Time.fixedDeltaTime;
+            if (rollTimer > 0.40f && rb.linearVelocity.sqrMagnitude < 0.003f && rb.angularVelocity.sqrMagnitude < 0.008f)
+            {
+                SettleDieFlat();
+            }
+            else if (rollTimer > 2.4f)
+            {
+                SettleDieFlat();
+            }
         }
     }
 
@@ -189,37 +224,6 @@ public class PhysicalThrowDie : MonoBehaviour
             transform.Rotate((smoothedHandVelocity.magnitude * 180f + 140f) * Time.deltaTime, 180f * Time.deltaTime, 110f * Time.deltaTime);
             return;
         }
-
-        // 3. Physics Tumble & Courtyard Bumper
-        if (isRolling)
-        {
-            rollTimer += Time.deltaTime;
-
-            if (transform.localPosition.y < 0.022f || Mathf.Abs(transform.localPosition.x) > 0.32f || Mathf.Abs(transform.localPosition.z) > 0.32f)
-            {
-                Vector3 clamped = new Vector3(
-                    Mathf.Clamp(transform.localPosition.x, -0.28f, 0.28f),
-                    Mathf.Max(0.045f, transform.localPosition.y),
-                    Mathf.Clamp(transform.localPosition.z, -0.28f, 0.28f)
-                );
-                transform.localPosition = clamped;
-
-                Vector3 v = rb.linearVelocity;
-                if (Mathf.Abs(clamped.x) >= 0.27f) v.x = -v.x * 0.6f;
-                if (Mathf.Abs(clamped.z) >= 0.27f) v.z = -v.z * 0.6f;
-                if (v.y < 0f) v.y = -v.y * diceBounciness;
-                rb.linearVelocity = v;
-            }
-
-            if (rollTimer > 0.40f && rb.linearVelocity.sqrMagnitude < 0.004f && rb.angularVelocity.sqrMagnitude < 0.01f)
-            {
-                SettleDieFlat();
-            }
-            else if (rollTimer > 2.4f)
-            {
-                SettleDieFlat();
-            }
-        }
     }
 
     void OnCollisionEnter(Collision collision)
@@ -235,7 +239,25 @@ public class PhysicalThrowDie : MonoBehaviour
         isRolling = false;
         rb.isKinematic = true;
         currentFaceValue = ReadTopFaceFromOrientation();
+        SnapOrientationToFace(currentFaceValue);
         OnDieSettled?.Invoke(currentFaceValue);
+    }
+
+    private void SnapOrientationToFace(int face)
+    {
+        Vector3 localTargetUp;
+        switch (face)
+        {
+            case 1: localTargetUp = Vector3.forward; break;
+            case 2: localTargetUp = Vector3.up; break;
+            case 3: localTargetUp = Vector3.right; break;
+            case 4: localTargetUp = Vector3.left; break;
+            case 5: localTargetUp = Vector3.down; break;
+            case 6: default: localTargetUp = Vector3.back; break;
+        }
+
+        Quaternion rot = Quaternion.FromToRotation(localTargetUp, Vector3.up);
+        transform.localRotation = rot;
     }
 
     public void TossWithPhysicsImpulse()
