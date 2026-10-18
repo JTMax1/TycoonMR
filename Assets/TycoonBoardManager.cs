@@ -147,6 +147,8 @@ public partial class TycoonBoardManager : MonoBehaviour
     public AudioClip BuildUpgradeSound => buildUpgradeSound;
 
     public bool isPassAndPlayMode = false;
+    protected int matchSessionGeneration = 0;
+    public int MatchSessionGeneration => matchSessionGeneration;
     public Vector3 LockedBoardPosition { get => lockedBoardPosition; set { lockedBoardPosition = value; transform.position = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
     public Quaternion LockedBoardRotation { get => lockedBoardRotation; set { lockedBoardRotation = value; transform.rotation = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
     public void AddPlayerCash(int playerIdx, int delta)
@@ -187,8 +189,17 @@ public partial class TycoonBoardManager : MonoBehaviour
     public Color GetPlayerColorPublic(int playerIdx) => GetPlayerColor(playerIdx);
     public int CalculatePlayerNetWorthPublic(int playerIdx) => CalculatePlayerNetWorth(playerIdx);
 
+    [Header("Network Authority & State Sync Containment")]
+    public bool enableNetworkStateSync = false;
+
     public void SyncStateFromNetwork(int turnPlayer, int[] incomingCash, int[] incomingPos, int[] incomingOwners, int[] incomingLevels, string anchorUuid)
     {
+        if (!enableNetworkStateSync)
+        {
+            Debug.LogWarning("[TycoonBoardManager] SyncStateFromNetwork ignored: network state synchronization is disabled to preserve authoritative local state.");
+            return;
+        }
+
         if (incomingCash != null && incomingCash.Length == 4)
         {
             for (int i = 0; i < 4; i++) playerCash[i] = incomingCash[i];
@@ -2163,10 +2174,46 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    public static void ClearMatchSave()
+    {
+        PlayerPrefs.DeleteKey("Tycoon_HasSave");
+        PlayerPrefs.DeleteKey("Tycoon_ActivePlayers");
+        PlayerPrefs.DeleteKey("Tycoon_AIDifficulty");
+        PlayerPrefs.DeleteKey("Tycoon_StartCashConfig");
+
+        for (int p = 0; p < 4; p++)
+        {
+            PlayerPrefs.DeleteKey($"Tycoon_Cash_P{p}");
+            PlayerPrefs.DeleteKey($"Tycoon_Pos_P{p}");
+            PlayerPrefs.DeleteKey($"Tycoon_Bankrupt_P{p}");
+            PlayerPrefs.DeleteKey($"Tycoon_InJail_P{p}");
+        }
+
+        PlayerPrefs.DeleteKey("Tycoon_Jackpot");
+        PlayerPrefs.DeleteKey("Tycoon_MarketCycle");
+        PlayerPrefs.DeleteKey("Tycoon_TotalTurns");
+        PlayerPrefs.DeleteKey("Tycoon_BoardScale");
+
+        for (int i = 0; i < 40; i++)
+        {
+            PlayerPrefs.DeleteKey($"Tycoon_Tile_{i}_Owner");
+            PlayerPrefs.DeleteKey($"Tycoon_Tile_{i}_Lvl");
+            PlayerPrefs.DeleteKey($"Tycoon_Tile_{i}_Mortgaged");
+        }
+        PlayerPrefs.Save();
+    }
+
     public void ResetMatch()
     {
-        PlayerPrefs.DeleteAll();
-        PlayerPrefs.Save();
+        ClearMatchSave();
+        matchSessionGeneration++;
+
+        if (minigameOrchestrator != null)
+        {
+            minigameOrchestrator.CancelActiveMinigame();
+        }
+        isLockpickingInProgress = false;
+        HideJailLockpickButton();
 
         for (int p = 0; p < 4; p++)
         {

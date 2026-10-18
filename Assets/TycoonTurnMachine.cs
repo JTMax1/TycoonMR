@@ -219,7 +219,19 @@ public partial class TycoonBoardManager
                             rent = discounted;
                             heistDone = true;
                         });
-                        while (!heistDone) yield return null;
+                        float heistElapsed = 0f;
+                        int startGen = matchSessionGeneration;
+                        while (!heistDone && heistElapsed < 25f && startGen == matchSessionGeneration)
+                        {
+                            heistElapsed += Time.unscaledDeltaTime;
+                            yield return null;
+                        }
+                        if (startGen != matchSessionGeneration) yield break;
+                        if (!heistDone)
+                        {
+                            Debug.LogWarning("[TycoonTurnMachine] Laser heist minigame timed out after 25s. Recovering turn flow safely.");
+                            minigameOrchestrator.CancelActiveMinigame();
+                        }
                     }
 
                     // Phase 21: Physical Rent Hand-Offs (Grab & Throw Cash Stack From Briefcase)
@@ -230,7 +242,14 @@ public partial class TycoonBoardManager
                         {
                             handoffDone = true;
                         });
-                        while (!handoffDone) yield return null;
+                        float handoffElapsed = 0f;
+                        int startGen = matchSessionGeneration;
+                        while (!handoffDone && handoffElapsed < 10f && startGen == matchSessionGeneration)
+                        {
+                            handoffElapsed += Time.unscaledDeltaTime;
+                            yield return null;
+                        }
+                        if (startGen != matchSessionGeneration) yield break;
                     }
 
                     playerCash[playerIdx] -= rent;
@@ -279,7 +298,19 @@ public partial class TycoonBoardManager
                         discountWon = discount;
                         taxDone = true;
                     });
-                    while (!taxDone) yield return null;
+                    float taxElapsed = 0f;
+                    int startGen = matchSessionGeneration;
+                    while (!taxDone && taxElapsed < 25f && startGen == matchSessionGeneration)
+                    {
+                        taxElapsed += Time.unscaledDeltaTime;
+                        yield return null;
+                    }
+                    if (startGen != matchSessionGeneration) yield break;
+                    if (!taxDone)
+                    {
+                        Debug.LogWarning("[TycoonTurnMachine] Tax pipe repair minigame timed out after 25s. Recovering turn flow safely.");
+                        minigameOrchestrator.CancelActiveMinigame();
+                    }
                     taxDue = Mathf.Max(10, tile.price - discountWon);
                     playerCash[0] -= taxDue;
                     freeParkingJackpot += taxDue;
@@ -373,7 +404,19 @@ public partial class TycoonBoardManager
                         wonCash = totalBonus;
                         minigameDone = true;
                     });
-                    while (!minigameDone) yield return null;
+                    float swatElapsed = 0f;
+                    int startGen = matchSessionGeneration;
+                    while (!minigameDone && swatElapsed < 25f && startGen == matchSessionGeneration)
+                    {
+                        swatElapsed += Time.unscaledDeltaTime;
+                        yield return null;
+                    }
+                    if (startGen != matchSessionGeneration) yield break;
+                    if (!minigameDone)
+                    {
+                        Debug.LogWarning("[TycoonTurnMachine] Vault cash swat minigame timed out after 25s. Recovering turn flow safely.");
+                        minigameOrchestrator.CancelActiveMinigame();
+                    }
                     playerCash[0] += wonCash;
                     PlaySFX(cashRegisterSound, procCashClip, 1.15f);
                     if (jackpotGoldPile != null)
@@ -420,7 +463,19 @@ public partial class TycoonBoardManager
                         discountWon = discount;
                         minigameDone = true;
                     });
-                    while (!minigameDone) yield return null;
+                    float repairElapsed = 0f;
+                    int startGen = matchSessionGeneration;
+                    while (!minigameDone && repairElapsed < 25f && startGen == matchSessionGeneration)
+                    {
+                        repairElapsed += Time.unscaledDeltaTime;
+                        yield return null;
+                    }
+                    if (startGen != matchSessionGeneration) yield break;
+                    if (!minigameDone)
+                    {
+                        Debug.LogWarning("[TycoonTurnMachine] Street repair minigame timed out after 25s. Recovering turn flow safely.");
+                        minigameOrchestrator.CancelActiveMinigame();
+                    }
                     repairBill = Mathf.Max(10, 100 - discountWon);
                     playerCash[0] -= repairBill;
                     freeParkingJackpot += repairBill;

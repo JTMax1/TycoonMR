@@ -20,8 +20,11 @@ public class TycoonColocationAndPolish : MonoBehaviour
 {
     private TycoonBoardManager boardManager;
 
-    [Header("1. Local WiFi Colocation Settings")]
-    public bool enableLocalWiFiColocationSync = true;
+    [Header("1. Local WiFi Colocation Settings (Contained / Default Disabled)")]
+    [Tooltip("Legacy raw UDP broadcast path. Kept disabled by default to prevent state corruption across headsets.")]
+    public bool enableLocalWiFiColocationSync = false;
+    [Tooltip("Explicit authorization flag required before any incoming network state packet can mutate local match state.")]
+    public bool isNetworkStateSyncAuthorized = false;
     public int broadcastPort = 47777;
 
     [Header("2. Network Identity")]
@@ -89,6 +92,11 @@ public class TycoonColocationAndPolish : MonoBehaviour
 
         // Initial refresh
         UpdateSeatNameplatesVisuals();
+    }
+
+    void OnDisable()
+    {
+        ShutdownWiFiBridge();
     }
 
     void OnDestroy()
@@ -332,6 +340,12 @@ public class TycoonColocationAndPolish : MonoBehaviour
 
     private void InitializeLocalWiFiBridge()
     {
+        if (!enableLocalWiFiColocationSync)
+        {
+            Debug.Log("<color=#FFCC00>[TycoonColocation]</color> Local WiFi Colocation Sync is DISABLED by default (safe containment).");
+            return;
+        }
+
         try
         {
             // UDP Broadcaster client
@@ -364,11 +378,13 @@ public class TycoonColocationAndPolish : MonoBehaviour
             if (udpListener != null)
             {
                 udpListener.Close();
+                udpListener.Dispose();
                 udpListener = null;
             }
             if (udpBroadcaster != null)
             {
                 udpBroadcaster.Close();
+                udpBroadcaster.Dispose();
                 udpBroadcaster = null;
             }
             if (listenerThread != null && listenerThread.IsAlive)
@@ -500,6 +516,11 @@ public class TycoonColocationAndPolish : MonoBehaviour
     private void ApplyIncomingNetworkPacket(string json)
     {
         if (string.IsNullOrEmpty(json) || boardManager == null) return;
+        if (!enableLocalWiFiColocationSync || !isNetworkStateSyncAuthorized)
+        {
+            // Containment: unsolicited or unauthenticated packets must not mutate local state
+            return;
+        }
 
         try
         {

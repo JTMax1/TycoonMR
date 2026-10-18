@@ -11,12 +11,23 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
     private TycoonBoardManager boardManager;
     private GameObject activeMinigameRoot;
     private bool isMinigameRunning = false;
+    private Coroutine activeMinigameCoroutine;
 
     public bool IsMinigameRunning => isMinigameRunning;
 
     void Awake()
     {
         boardManager = GetComponent<TycoonBoardManager>();
+    }
+
+    void OnDisable()
+    {
+        CancelActiveMinigame();
+    }
+
+    void OnDestroy()
+    {
+        CancelActiveMinigame();
     }
 
     // =========================================================================
@@ -73,7 +84,7 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
     public void RunVaultCashSwatMinigame(Action<int> onComplete)
     {
         if (isMinigameRunning) CancelActiveMinigame();
-        StartCoroutine(VaultCashSwatRoutine(onComplete));
+        activeMinigameCoroutine = StartCoroutine(VaultCashSwatRoutine(onComplete));
     }
 
     private class FloatingCashBill
@@ -275,7 +286,7 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
     public void RunJailLockpickMinigame(Action<bool> onComplete)
     {
         if (isMinigameRunning) CancelActiveMinigame();
-        StartCoroutine(JailLockpickRoutine(onComplete));
+        activeMinigameCoroutine = StartCoroutine(JailLockpickRoutine(onComplete));
     }
 
     private class LockpickPin
@@ -461,7 +472,7 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
     public void RunPipeRepairMinigame(Action<int> onComplete)
     {
         if (isMinigameRunning) CancelActiveMinigame();
-        StartCoroutine(PipeRepairRoutine(onComplete));
+        activeMinigameCoroutine = StartCoroutine(PipeRepairRoutine(onComplete));
     }
 
     private class PipeValve
@@ -620,7 +631,7 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
     public void RunLaserHeistSabotageMinigame(int baseRent, Action<int> onComplete)
     {
         if (isMinigameRunning) CancelActiveMinigame();
-        StartCoroutine(LaserHeistRoutine(baseRent, onComplete));
+        activeMinigameCoroutine = StartCoroutine(LaserHeistRoutine(baseRent, onComplete));
     }
 
     private IEnumerator LaserHeistRoutine(int baseRent, Action<int> onComplete)
@@ -777,6 +788,11 @@ public class TycoonMinigameOrchestrator : MonoBehaviour
 
     public void CancelActiveMinigame()
     {
+        if (activeMinigameCoroutine != null)
+        {
+            StopCoroutine(activeMinigameCoroutine);
+            activeMinigameCoroutine = null;
+        }
         if (activeMinigameRoot != null)
         {
             Destroy(activeMinigameRoot);
