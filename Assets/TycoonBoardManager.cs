@@ -160,6 +160,15 @@ public partial class TycoonBoardManager : MonoBehaviour
             OnGameStateModified?.Invoke();
         }
     }
+    public void SetPlayerCash(int playerIdx, int amount)
+    {
+        if (playerCash != null && playerIdx >= 0 && playerIdx < playerCash.Length)
+        {
+            playerCash[playerIdx] = amount;
+            UpdateLiveHUDStats();
+            OnGameStateModified?.Invoke();
+        }
+    }
     public int CurrentTurnPlayer { get; private set; } = 0;
     public event System.Action<int> OnTurnStarted;
     public event System.Action<int, int> OnRivalPaidRentToPlayer;

@@ -30,7 +30,9 @@ public partial class TycoonBoardManager
         public GameObject spawnedBuilding;
     }
 
-    void InitializeOfficialMonopolyMap()
+    public BoardTile GetTile(int index) => (board != null && index >= 0 && index < 40) ? board[index] : null;
+
+    public void InitializeOfficialMonopolyMap()
     {
         SetTile(0, "GO (COLLECT $200)", TileType.Go, -1, 0, 0, null);
         SetTile(1, "MEDITERRANEAN AVE", TileType.Property, 0, 60, 50, new int[] { 2, 10, 30, 90, 160, 250 });
@@ -583,15 +585,16 @@ public partial class TycoonBoardManager
         }
     }
 
-    int CalculateAuthenticRent(BoardTile tile, int diceRoll)
+    public int CalculateAuthenticRent(BoardTile tile, int diceRoll)
     {
+        if (tile == null) return 0;
         if (tile.isMortgaged) return 0;
 
         if (tile.type == TileType.Railroad)
         {
             int rrCount = 0;
             int[] rrIndices = { 5, 15, 25, 35 };
-            foreach (int idx in rrIndices) if (board[idx].owner == tile.owner) rrCount++;
+            foreach (int idx in rrIndices) if (board != null && board[idx] != null && board[idx].owner == tile.owner) rrCount++;
             int baseRent = 25 * (int)Mathf.Pow(2, Mathf.Max(0, rrCount - 1));
             if (currentMarketCycle == MarketCycle.TechIPOSurge)
             {
@@ -602,7 +605,8 @@ public partial class TycoonBoardManager
 
         if (tile.type == TileType.Utility)
         {
-            bool ownsBoth = (board[12].owner == tile.owner && board[28].owner == tile.owner);
+            bool ownsBoth = board != null && board[12] != null && board[28] != null &&
+                            (board[12].owner == tile.owner && board[28].owner == tile.owner);
             int baseRent = diceRoll * (ownsBoth ? 10 : 4);
             if (currentMarketCycle == MarketCycle.TechIPOSurge)
             {
@@ -611,8 +615,11 @@ public partial class TycoonBoardManager
             return baseRent;
         }
 
+        if (tile.rentByLevel == null || tile.rentByLevel.Length == 0) return 0;
         int propRent = tile.rentByLevel[Mathf.Clamp(tile.buildingLevel, 0, 5)];
-        if (OwnsFullColorGroup(tile.owner, tile.colorGroup) && tile.buildingLevel <= 1)
+
+        // Monopoly rule: 2x rent applies ONLY to unimproved properties (Level 0), not to houses/skyscrapers
+        if (tile.buildingLevel == 0 && OwnsFullColorGroup(tile.owner, tile.colorGroup))
         {
             propRent = propRent * 2;
         }
@@ -629,12 +636,66 @@ public partial class TycoonBoardManager
         return propRent;
     }
 
-    bool OwnsFullColorGroup(int playerIdx, int colorGroup)
+    public enum BuildValidationResult
     {
-        if (colorGroup < 0) return false;
+        Success,
+        NotAProperty,
+        NotOwner,
+        IncompleteGroup,
+        GroupHasMortgage,
+        MaxLevelReached,
+        UnevenDevelopment,
+        InsufficientFunds
+    }
+
+    public BuildValidationResult CanBuild(int playerIdx, int tileIndex)
+    {
+        if (board == null || tileIndex < 0 || tileIndex >= 40 || board[tileIndex] == null)
+            return BuildValidationResult.NotAProperty;
+
+        BoardTile tile = board[tileIndex];
+        if (tile.type != TileType.Property)
+            return BuildValidationResult.NotAProperty;
+
+        if (tile.owner != playerIdx)
+            return BuildValidationResult.NotOwner;
+
+        if (!OwnsFullColorGroup(playerIdx, tile.colorGroup))
+            return BuildValidationResult.IncompleteGroup;
+
+        // Check if any property in this color group is mortgaged
         for (int i = 0; i < 40; i++)
         {
-            if (board[i].colorGroup == colorGroup && board[i].owner != playerIdx)
+            if (board[i] != null && board[i].colorGroup == tile.colorGroup && board[i].isMortgaged)
+                return BuildValidationResult.GroupHasMortgage;
+        }
+
+        if (tile.buildingLevel >= 5)
+            return BuildValidationResult.MaxLevelReached;
+
+        // Enforce even building: target property cannot have higher level than any other property in the group
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null && board[i].colorGroup == tile.colorGroup && i != tileIndex)
+            {
+                if (tile.buildingLevel > board[i].buildingLevel)
+                    return BuildValidationResult.UnevenDevelopment;
+            }
+        }
+
+        int actualBuildCost = (currentMarketCycle == MarketCycle.BearRecession) ? (int)(tile.buildCost * 0.7f) : tile.buildCost;
+        if (playerCash != null && playerIdx >= 0 && playerIdx < playerCash.Length && playerCash[playerIdx] < actualBuildCost)
+            return BuildValidationResult.InsufficientFunds;
+
+        return BuildValidationResult.Success;
+    }
+
+    public bool OwnsFullColorGroup(int playerIdx, int colorGroup)
+    {
+        if (colorGroup < 0 || board == null) return false;
+        for (int i = 0; i < 40; i++)
+        {
+            if (board[i] != null && board[i].colorGroup == colorGroup && board[i].owner != playerIdx)
                 return false;
         }
         return true;

@@ -640,15 +640,21 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
 
         float timer = 6.0f;
-        bool playerDroppedOut = false;
+        bool playerDroppedOut = isBankrupt != null && isBankrupt[0];
         auctionPlayerBidFlag = false;
         auctionPlayerDropFlag = false;
 
         PlaySFX(cashRegisterSound, procCashClip, 1.3f);
         SetRivalReaction(1, AvatarMood.Thinking, $"An auction for {tile.name}! Opening bid: ${currentBid}. Let's bid!");
 
+        int startGen = matchSessionGeneration;
         while (timer > 0f)
         {
+            if (startGen != matchSessionGeneration)
+            {
+                if (gavel != null) Destroy(gavel);
+                yield break;
+            }
             timer -= Time.deltaTime;
 
             if (!playerDroppedOut)
@@ -736,24 +742,24 @@ public partial class TycoonBoardManager : MonoBehaviour
         {
             playerCash[0] -= currentBid;
             tile.owner = 0;
-            if (tile.type == TileType.Property && tile.buildingLevel == 0) tile.buildingLevel = 1;
+            // Deeds won at auction start at Level 0 (unimproved) per official rules
             ApplyTileOwnershipVisuals(tile, 0);
             RebuildMonopolySynergyBeams();
             PlaySFX(cashRegisterSound, procCashClip, 1.25f);
             StartCoroutine(SpawnFlyingCoinsStream(playerTokens[0].position, tile.tileTransform.position, 6));
-            RefreshDashboard($"AUCTION WON BY YOU FOR ${currentBid}!", $"Acquired {tile.name} with Level 1 Building at auction!");
+            RefreshDashboard($"AUCTION WON BY YOU FOR ${currentBid}!", $"Acquired {tile.name} deed at auction!");
             SetRivalReaction(1, AvatarMood.AngrySlam, $"You sniped {tile.name} for ${currentBid}... well played.");
         }
         else if (highestBidder > 0)
         {
             playerCash[highestBidder] -= currentBid;
             tile.owner = highestBidder;
-            if (tile.type == TileType.Property && tile.buildingLevel == 0) tile.buildingLevel = 1;
+            // Deeds won at auction start at Level 0 (unimproved) per official rules
             ApplyTileOwnershipVisuals(tile, highestBidder);
             RebuildMonopolySynergyBeams();
             PlaySFX(cashRegisterSound, procCashClip, 1.25f);
             StartCoroutine(SpawnFlyingCoinsStream(playerTokens[highestBidder].position, tile.tileTransform.position, 6));
-            RefreshDashboard($"AUCTION WON BY {GetPlayerName(highestBidder).ToUpper()} FOR ${currentBid}!", $"{GetPlayerName(highestBidder)} claimed {tile.name} at auction!");
+            RefreshDashboard($"AUCTION WON BY {GetPlayerName(highestBidder).ToUpper()} FOR ${currentBid}!", $"{GetPlayerName(highestBidder)} claimed {tile.name} deed at auction!");
             SetRivalReaction(highestBidder, AvatarMood.HappyCheer, $"A brilliant asset acquisition for ${currentBid}!");
         }
         else

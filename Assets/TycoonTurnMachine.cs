@@ -517,11 +517,7 @@ public partial class TycoonBoardManager
 
         StartCoroutine(SpawnFlyingCoinsStream(playerTokens[playerIdx].position, tile.tileTransform.position, 6));
 
-        if (tile.type == TileType.Property && tile.buildingLevel == 0)
-        {
-            tile.buildingLevel = 1;
-        }
-
+        // Newly acquired deeds start at Level 0 (unimproved) per official rules
         ApplyTileOwnershipVisuals(tile, playerIdx);
         RebuildMonopolySynergyBeams();
 
@@ -543,7 +539,7 @@ public partial class TycoonBoardManager
 
         RefreshDashboard(
             $"{GetPlayerName(playerIdx).ToUpper()} BOUGHT {tile.name} (${tile.price})!",
-            "Tile claimed & Level 1 structure erected! Touch [BUILD (U)] on your turn to upgrade."
+            "Deed acquired! Acquire the full color group to unlock building construction."
         );
 
         SaveGameState();
@@ -572,34 +568,37 @@ public partial class TycoonBoardManager
 
     public void TryBuildChronologically(int playerIdx)
     {
-        BoardTile standingTile = board[playerPos[playerIdx]];
         BoardTile targetTile = null;
 
-        // Targeted Upgrade: if inspecting an owned, unmortgaged property via tile poke, upgrade that specific tile first!
+        // Targeted Upgrade: if inspecting an owned property via tile poke, check that specific tile first
         if (playerIdx == 0 && selectedTileIndex >= 0 && selectedTileIndex < 40 &&
+            board[selectedTileIndex] != null &&
             board[selectedTileIndex].type == TileType.Property &&
-            board[selectedTileIndex].owner == playerIdx &&
-            !board[selectedTileIndex].isMortgaged &&
-            board[selectedTileIndex].buildingLevel < 5)
+            board[selectedTileIndex].owner == playerIdx)
         {
-            targetTile = board[selectedTileIndex];
-        }
-        else if (standingTile.type == TileType.Property && standingTile.owner == playerIdx && !standingTile.isMortgaged && standingTile.buildingLevel < 5)
-        {
-            targetTile = standingTile;
+            BuildValidationResult result = CanBuild(playerIdx, selectedTileIndex);
+            if (result == BuildValidationResult.Success)
+            {
+                targetTile = board[selectedTileIndex];
+            }
+            else
+            {
+                DisplayBuildValidationFeedback(board[selectedTileIndex], result);
+                return;
+            }
         }
         else
         {
-            int lowestLevelFound = 99;
+            // Scan properties for an eligible building target that satisfies CanBuild
             for (int offset = 0; offset < 40; offset++)
             {
                 int idx = (buildCycleCursor + offset) % 40;
-                if (board[idx].type == TileType.Property && board[idx].owner == playerIdx && !board[idx].isMortgaged && board[idx].buildingLevel < 5)
+                if (board[idx] != null && board[idx].type == TileType.Property && board[idx].owner == playerIdx)
                 {
-                    if (board[idx].buildingLevel < lowestLevelFound)
+                    if (CanBuild(playerIdx, idx) == BuildValidationResult.Success)
                     {
-                        lowestLevelFound = board[idx].buildingLevel;
                         targetTile = board[idx];
+                        break;
                     }
                 }
             }
@@ -607,7 +606,7 @@ public partial class TycoonBoardManager
 
         if (targetTile == null)
         {
-            RefreshDashboard("NO OWNED PROPERTY TO UPGRADE", "Buy a Property Deed first, then touch [BUILD (U)].");
+            RefreshDashboard("CANNOT BUILD: MONOPOLY REQUIRED", "You must own a complete, unmortgaged color group to build houses.");
             return;
         }
 
@@ -632,9 +631,35 @@ public partial class TycoonBoardManager
         }
     }
 
+    private void DisplayBuildValidationFeedback(BoardTile tile, BuildValidationResult result)
+    {
+        switch (result)
+        {
+            case BuildValidationResult.IncompleteGroup:
+                RefreshDashboard("MONOPOLY REQUIRED", $"You must own all properties in the {tile.name} color group to build!");
+                break;
+            case BuildValidationResult.GroupHasMortgage:
+                RefreshDashboard("GROUP MORTGAGED", $"Unmortgage all properties in the {tile.name} color group before building!");
+                break;
+            case BuildValidationResult.UnevenDevelopment:
+                RefreshDashboard("EVEN BUILDING REQUIRED", "Houses must be built evenly across all properties in this color group!");
+                break;
+            case BuildValidationResult.MaxLevelReached:
+                RefreshDashboard("MAX DEVELOPMENT REACHED", $"{tile.name} is already at Level 5 Skyscraper Hotel!");
+                break;
+            case BuildValidationResult.InsufficientFunds:
+                RefreshDashboard("INSUFFICIENT FUNDS", $"Need ${tile.buildCost} to build on {tile.name}.");
+                break;
+            default:
+                RefreshDashboard("CANNOT BUILD", $"Cannot build on {tile.name} at this time.");
+                break;
+        }
+    }
+
     void ExecuteBuildingUpgrade(int playerIdx, BoardTile targetTile, int actualBuildCost, int chosenStyle = 0)
     {
-        if (targetTile == null || playerCash[playerIdx] < actualBuildCost || targetTile.buildingLevel >= 5) return;
+        if (targetTile == null || playerCash[playerIdx] < actualBuildCost) return;
+        if (CanBuild(playerIdx, targetTile.index) != BuildValidationResult.Success) return;
 
         playerCash[playerIdx] -= actualBuildCost;
         targetTile.buildingLevel++;
