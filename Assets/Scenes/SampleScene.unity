@@ -1599,14 +1599,14 @@ MonoBehaviour:
   waxSealStampPrefab: {fileID: 0}
   auctionGavelPrefab: {fileID: 602622052190468803, guid: cace3be87f734094f9d915a196eb877b, type: 3}
   cashBriefcasePrefab: {fileID: 1321400763242450216, guid: 47c725d3548d6384192e503e2e7aa339, type: 3}
-  bankVaultPrefab: {fileID: 4517726551017671740, guid: 301b1a48426ce1e44a87f723128315b9, type: 3}
-  dollarBillPrefab: {fileID: 0}
+  bankVaultPrefab: {fileID: 1076304950883988858, guid: 08e63c6fe8c444c39aea9487deca5510, type: 3}
+  dollarBillPrefab: {fileID: 6520326442717609613, guid: 4de605c1d5384d979d7b13f61eaa8fd5, type: 3}
   padlockPrefab: {fileID: 6157252903731777712, guid: d54f30e32b931eb4c94f7b6c229366e4, type: 3}
   steamPipeValvePrefab: {fileID: 4182609834740599872, guid: 7eed55408f5c314439b3cc196aca4b55, type: 3}
-  jackpotChestPrefab: {fileID: 6987150949061285597, guid: 17755911f12715b46abdc3db02860d36, type: 3}
+  jackpotChestPrefab: {fileID: 1076304950883988858, guid: 08e63c6fe8c444c39aea9487deca5510, type: 3}
   pedestrianPrefab: {fileID: 1257145675899786761, guid: d63b6a670a6a76a45913b3e20740616b, type: 3}
   crosswalkPropPrefab: {fileID: 0}
-  victoryTrophyPrefab: {fileID: 1723566301245872664, guid: c281362843f585e48832395b63ac1d54, type: 3}
+  victoryTrophyPrefab: {fileID: 3381085232793115531, guid: 22089a743584418e8a551cae4da4be7d, type: 3}
   isPassAndPlayMode: 0
 --- !u!4 &1024132991
 Transform:
