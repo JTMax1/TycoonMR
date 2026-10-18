@@ -2265,7 +2265,7 @@ MonoBehaviour:
   goToJailLandmarkPrefab: {fileID: 1295220564887911823, guid: 8bf27f8a5975e1f4e9160e979cfcb02b, type: 3}
   roadStraightPrefab: {fileID: 100000, guid: 4f32dfddb033d3e40b5841bc53cc1689, type: 3}
   billboardPropPrefab: {fileID: 3934781833859567844, guid: ccfe0baf0137c8f4a92d8f08c09c2a8d, type: 3}
-  tradeContractPrefab: {fileID: 2738966302784258, guid: 28224d4d239245f3b8e4d73218cb08ac, type: 3}
+  tradeContractPrefab: {fileID: 0}
   waxSealStampPrefab: {fileID: 0}
   auctionGavelPrefab: {fileID: 602622052190468803, guid: cace3be87f734094f9d915a196eb877b, type: 3}
   cashBriefcasePrefab: {fileID: 1321400763242450216, guid: 47c725d3548d6384192e503e2e7aa339, type: 3}
