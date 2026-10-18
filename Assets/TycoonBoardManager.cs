@@ -564,7 +564,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         FixMicrogestureEventSources();
 
         Rigidbody boardRb = GetComponent<Rigidbody>();
-        if (boardRb != null) Destroy(boardRb);
+        if (boardRb != null) SafeDestroy(boardRb);
 
         EnforceUnderlayPassthrough();
     }
@@ -679,14 +679,21 @@ public partial class TycoonBoardManager : MonoBehaviour
         }
     }
 
+    public static void SafeDestroy(UnityEngine.Object obj)
+    {
+        if (obj == null) return;
+        if (Application.isPlaying) Destroy(obj);
+        else DestroyImmediate(obj);
+    }
+
     public void StripRoguePhysicsFromImportedPrefab(GameObject spawnedInstance)
     {
         if (spawnedInstance == null) return;
         Rigidbody[] rbs = spawnedInstance.GetComponentsInChildren<Rigidbody>(true);
-        for (int i = 0; i < rbs.Length; i++) Destroy(rbs[i]);
+        for (int i = 0; i < rbs.Length; i++) SafeDestroy(rbs[i]);
 
         Collider[] cols = spawnedInstance.GetComponentsInChildren<Collider>(true);
-        for (int i = 0; i < cols.Length; i++) Destroy(cols[i]);
+        for (int i = 0; i < cols.Length; i++) SafeDestroy(cols[i]);
     }
 
     void Start()
@@ -1914,7 +1921,7 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     void Create3DHolographicStartMenu()
     {
-        if (startMenuHolder != null) Destroy(startMenuHolder);
+        if (startMenuHolder != null) SafeDestroy(startMenuHolder);
 
         startMenuHolder = new GameObject("Executive_Start_Menu");
         startMenuHolder.transform.SetParent(transform, false);
@@ -1927,7 +1934,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         bg.transform.localPosition = Vector3.zero;
         bg.transform.localRotation = Quaternion.identity;
         bg.transform.localScale = new Vector3(0.38f, 0.28f, 0.010f);
-        Destroy(bg.GetComponent<Collider>());
+        SafeDestroy(bg.GetComponent<Collider>());
         bg.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.04f, 0.07f, 0.14f), 0.92f);
 
         GameObject border = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1936,7 +1943,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         border.transform.localPosition = new Vector3(0f, 0f, 0.002f);
         border.transform.localRotation = Quaternion.identity;
         border.transform.localScale = new Vector3(0.386f, 0.286f, 0.008f);
-        Destroy(border.GetComponent<Collider>());
+        SafeDestroy(border.GetComponent<Collider>());
         border.GetComponent<Renderer>().material = CreateColoredMaterial(new Color(0.18f, 0.85f, 0.45f), 0.45f);
 
         GameObject headerCanvasGO = new GameObject("StartMenu_HeaderCanvas");
@@ -2102,7 +2109,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             inJail[i] = false;
             if (jailCageHolders[i] != null)
             {
-                Destroy(jailCageHolders[i]);
+                SafeDestroy(jailCageHolders[i]);
                 jailCageHolders[i] = null;
             }
             PositionTokenOnTile(i, 0);
@@ -2303,8 +2310,11 @@ public partial class TycoonBoardManager : MonoBehaviour
     {
         PlayerPrefs.DeleteKey("Tycoon_HasSave");
         PlayerPrefs.DeleteKey("Tycoon_ActivePlayers");
+        PlayerPrefs.DeleteKey("Tycoon_ActivePlayerCount");
         PlayerPrefs.DeleteKey("Tycoon_AIDifficulty");
         PlayerPrefs.DeleteKey("Tycoon_StartCashConfig");
+        PlayerPrefs.DeleteKey("Tycoon_CurrentTurn");
+        PlayerPrefs.DeleteKey("Tycoon_TurnPlayer");
 
         for (int p = 0; p < 4; p++)
         {
@@ -2312,6 +2322,11 @@ public partial class TycoonBoardManager : MonoBehaviour
             PlayerPrefs.DeleteKey($"Tycoon_Pos_P{p}");
             PlayerPrefs.DeleteKey($"Tycoon_Bankrupt_P{p}");
             PlayerPrefs.DeleteKey($"Tycoon_InJail_P{p}");
+
+            PlayerPrefs.DeleteKey($"Tycoon_Player_{p}_Cash");
+            PlayerPrefs.DeleteKey($"Tycoon_Player_{p}_Pos");
+            PlayerPrefs.DeleteKey($"Tycoon_Player_{p}_Bankrupt");
+            PlayerPrefs.DeleteKey($"Tycoon_Player_{p}_InJail");
         }
 
         PlayerPrefs.DeleteKey("Tycoon_Jackpot");
@@ -2349,7 +2364,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             inJail[p] = false;
             if (jailCageHolders[p] != null)
             {
-                Destroy(jailCageHolders[p]);
+                SafeDestroy(jailCageHolders[p]);
                 jailCageHolders[p] = null;
             }
             PositionTokenOnTile(p, 0);
@@ -2366,8 +2381,8 @@ public partial class TycoonBoardManager : MonoBehaviour
                 board[i].owner = -1;
                 board[i].buildingLevel = 0;
                 board[i].isMortgaged = false;
-                if (board[i].ownershipBadge != null) Destroy(board[i].ownershipBadge);
-                if (board[i].spawnedBuilding != null) Destroy(board[i].spawnedBuilding);
+                if (board[i].ownershipBadge != null) SafeDestroy(board[i].ownershipBadge);
+                if (board[i].spawnedBuilding != null) SafeDestroy(board[i].spawnedBuilding);
                 if (board[i].tileRenderer != null)
                 {
                     board[i].tileRenderer.material = CreateColoredMaterial(GetOfficialColor(board[i]), 0.85f);

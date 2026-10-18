@@ -39,7 +39,7 @@ public class PhysicalThrowDie : MonoBehaviour
         rb.angularDamping = 0.32f;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        rb.isKinematic = true;
+        rb.isKinematic = false;
 
         boxCol = GetComponent<BoxCollider>();
         PhysicsMaterial bounceMat = new PhysicsMaterial("TunedDiceBounce");
