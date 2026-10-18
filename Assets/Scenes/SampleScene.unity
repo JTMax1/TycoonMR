@@ -2280,6 +2280,7 @@ MonoBehaviour:
   crosswalkPropPrefab: {fileID: 0}
   victoryTrophyPrefab: {fileID: 3381085232793115531, guid: 22089a743584418e8a551cae4da4be7d, type: 3}
   isPassAndPlayMode: 0
+  enableNetworkStateSync: 0
   currentMatchMode: 0
 --- !u!4 &1024132991
 Transform:

@@ -505,6 +505,13 @@ public partial class TycoonBoardManager : MonoBehaviour
             }
         }
 
+        // 1b. Disable any legacy StandaloneInputModule to eliminate InvalidOperationException spam
+        UnityEngine.EventSystems.StandaloneInputModule[] legacyModules = GameObject.FindObjectsByType<UnityEngine.EventSystems.StandaloneInputModule>(FindObjectsInactive.Include);
+        foreach (var sim in legacyModules)
+        {
+            if (sim != null) sim.enabled = false;
+        }
+
         // 2. Prefab safety guards against rogue Meta SDK assets
         if (tradeContractPrefab != null && (tradeContractPrefab.name.Contains("Microgesture") || tradeContractPrefab.name.Contains("Spawner") || tradeContractPrefab.name.Contains("NGO")))
             tradeContractPrefab = null;

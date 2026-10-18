@@ -38,7 +38,7 @@ MonoBehaviour:
   collapsedIdenticalLogEntries: 0
   maximumNumberOfLogEntries: 1000
   panelDistance: 1
-  createEventSystem: 1
+  createEventSystem: 0
   automaticLayerCullingUpdate: 1
   panelLayer: 20
   meshRendererLayer: 21
