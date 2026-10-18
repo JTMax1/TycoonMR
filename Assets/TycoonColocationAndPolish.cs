@@ -7,11 +7,13 @@ using System.Text;
 using System.Threading;
 using UnityEngine;
 using TMPro;
+using Unity.Netcode;
 
 /// <summary>
-/// Phase 18: Multi-Headset Local WiFi Colocation Sync & 3D Executive Seat Nameplates
-/// Automatically manages 4 physical seat plaques around the table perimeter and broadcasts
-/// game state changes across local WiFi (UDP Port 47777) for multi-headset mixed reality sessions.
+/// Phase 18 & 20: Multi-Headset Local WiFi Colocation Sync & 3D Executive Seat Nameplates
+/// Automatically manages 4 physical seat plaques around the table perimeter, binds to Unity Netcode
+/// for GameObjects (NGO) when active, and broadcasts game state & real-time events (dice tosses, auction bids)
+/// across local WiFi for multi-headset mixed reality sessions.
 /// </summary>
 [RequireComponent(typeof(TycoonBoardManager))]
 public class TycoonColocationAndPolish : MonoBehaviour
@@ -41,6 +43,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
     [System.Serializable]
     public class TycoonNetworkPacket
     {
+        public string packetType = "STATE_SYNC"; // "STATE_SYNC", "DICE_THROW", "AUCTION_BID"
         public string senderId;
         public long timestamp;
         public int currentTurn;
@@ -49,6 +52,13 @@ public class TycoonColocationAndPolish : MonoBehaviour
         public int[] tileOwners;
         public int[] tileLevels;
         public string anchorUuid;
+
+        // Phase 20 Real-Time Event Sync Fields
+        public Vector3 diceVelocity;
+        public int die1Target = 6;
+        public int die2Target = 6;
+        public int auctionBidder = -1;
+        public int auctionBidAmount = 0;
     }
 
     void Awake()
@@ -66,7 +76,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
         // 2. Spawn 3D Executive Seat Nameplates
         SpawnExecutiveSeatNameplates();
 
-        // 3. Initialize Local WiFi Sync Broadcast & Listener
+        // 3. Initialize Local WiFi Sync Broadcast & Listener (cooperative fallback)
         if (enableLocalWiFiColocationSync)
         {
             InitializeLocalWiFiBridge();
@@ -75,6 +85,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
         // 4. Hook Game State Change Events
         boardManager.OnGameStateModified += HandleLocalGameStateChanged;
         boardManager.OnTurnStarted += HandleTurnStarted;
+        boardManager.OnMultiplayerMatchRequested += HandleMultiplayerMatchRequested;
 
         // Initial refresh
         UpdateSeatNameplatesVisuals();
@@ -86,6 +97,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
         {
             boardManager.OnGameStateModified -= HandleLocalGameStateChanged;
             boardManager.OnTurnStarted -= HandleTurnStarted;
+            boardManager.OnMultiplayerMatchRequested -= HandleMultiplayerMatchRequested;
         }
 
         ShutdownWiFiBridge();
@@ -94,6 +106,63 @@ public class TycoonColocationAndPolish : MonoBehaviour
     void OnApplicationQuit()
     {
         ShutdownWiFiBridge();
+    }
+
+    private void HandleMultiplayerMatchRequested(TycoonBoardManager.MatchMultiplayerMode mode)
+    {
+        if (mode == TycoonBoardManager.MatchMultiplayerMode.LocalWiFiColocation)
+        {
+            try
+            {
+                if (NetworkManager.Singleton != null)
+                {
+                    if (!NetworkManager.Singleton.IsListening)
+                    {
+                        NetworkManager.Singleton.StartHost();
+                        boardManager.RefreshDashboard(
+                            "LOCAL WIFI COLOCATION HOST",
+                            "Netcode Host started! Colocation building blocks active. Waiting for client headsets..."
+                        );
+                    }
+                }
+                else
+                {
+                    boardManager.RefreshDashboard(
+                        "LOCAL WIFI COLOCATION READY",
+                        $"UDP Colocation Bridge active on port {broadcastPort} (Single-Device Fallback)."
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[TycoonColocation] Netcode start host note: {ex.Message}");
+            }
+        }
+        else if (mode == TycoonBoardManager.MatchMultiplayerMode.OnlineMultiplayer)
+        {
+            try
+            {
+                if (NetworkManager.Singleton != null && !NetworkManager.Singleton.IsListening)
+                {
+                    NetworkManager.Singleton.StartHost();
+                    boardManager.RefreshDashboard(
+                        "ONLINE MULTIPLAYER SESSION",
+                        "Netcode Online session initialized! Meta Matchmaking building blocks active in scene."
+                    );
+                }
+                else
+                {
+                    boardManager.RefreshDashboard(
+                        "ONLINE MULTIPLAYER READY",
+                        "Global matchmaking session requested. Waiting for peer connections..."
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[TycoonColocation] Netcode online start note: {ex.Message}");
+            }
+        }
     }
 
     void Update()
@@ -259,7 +328,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
 
     #endregion
 
-    #region B. Local WiFi Colocation Sync Bridge (UDP Port 47777)
+    #region B. Local WiFi Colocation Sync Bridge (UDP Port 47777 + Netcode Events)
 
     private void InitializeLocalWiFiBridge()
     {
@@ -304,7 +373,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
             }
             if (listenerThread != null && listenerThread.IsAlive)
             {
-                listenerThread.Abort();
+                listenerThread.Join(150);
                 listenerThread = null;
             }
         }
@@ -351,6 +420,7 @@ public class TycoonColocationAndPolish : MonoBehaviour
         {
             TycoonNetworkPacket packet = new TycoonNetworkPacket
             {
+                packetType = "STATE_SYNC",
                 senderId = localDeviceId,
                 timestamp = DateTime.UtcNow.Ticks,
                 currentTurn = boardManager.CurrentTurnPlayer,
@@ -361,15 +431,70 @@ public class TycoonColocationAndPolish : MonoBehaviour
                 anchorUuid = PlayerPrefs.GetString("Tycoon_SpatialAnchor_UUID", "")
             };
 
-            string json = JsonUtility.ToJson(packet);
-            byte[] payload = Encoding.UTF8.GetBytes(json);
-            IPEndPoint broadcastEP = new IPEndPoint(IPAddress.Broadcast, broadcastPort);
-            udpBroadcaster.Send(payload, payload.Length, broadcastEP);
+            SendNetworkPacket(packet);
         }
         catch (Exception ex)
         {
             Debug.LogWarning($"[TycoonColocation] Broadcast error: {ex.Message}");
         }
+    }
+
+    public void BroadcastDiceThrow(Vector3 velocity, int d1Target, int d2Target)
+    {
+        if (!enableLocalWiFiColocationSync || udpBroadcaster == null) return;
+
+        try
+        {
+            TycoonNetworkPacket packet = new TycoonNetworkPacket
+            {
+                packetType = "DICE_THROW",
+                senderId = localDeviceId,
+                timestamp = DateTime.UtcNow.Ticks,
+                currentTurn = boardManager.CurrentTurnPlayer,
+                diceVelocity = velocity,
+                die1Target = d1Target,
+                die2Target = d2Target
+            };
+
+            SendNetworkPacket(packet);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[TycoonColocation] BroadcastDiceThrow error: {ex.Message}");
+        }
+    }
+
+    public void BroadcastAuctionBid(int bidderIdx, int bidAmount)
+    {
+        if (!enableLocalWiFiColocationSync || udpBroadcaster == null) return;
+
+        try
+        {
+            TycoonNetworkPacket packet = new TycoonNetworkPacket
+            {
+                packetType = "AUCTION_BID",
+                senderId = localDeviceId,
+                timestamp = DateTime.UtcNow.Ticks,
+                currentTurn = boardManager.CurrentTurnPlayer,
+                auctionBidder = bidderIdx,
+                auctionBidAmount = bidAmount
+            };
+
+            SendNetworkPacket(packet);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[TycoonColocation] BroadcastAuctionBid error: {ex.Message}");
+        }
+    }
+
+    private void SendNetworkPacket(TycoonNetworkPacket packet)
+    {
+        if (udpBroadcaster == null) return;
+        string json = JsonUtility.ToJson(packet);
+        byte[] payload = Encoding.UTF8.GetBytes(json);
+        IPEndPoint broadcastEP = new IPEndPoint(IPAddress.Broadcast, broadcastPort);
+        udpBroadcaster.Send(payload, payload.Length, broadcastEP);
     }
 
     private void ApplyIncomingNetworkPacket(string json)
@@ -383,6 +508,18 @@ public class TycoonColocationAndPolish : MonoBehaviour
 
             // Ignore our own broadcasted packets
             if (packet.senderId == localDeviceId) return;
+
+            if (packet.packetType == "DICE_THROW")
+            {
+                boardManager.ExecuteRemoteDiceTumble(packet.diceVelocity, packet.die1Target, packet.die2Target);
+                return;
+            }
+
+            if (packet.packetType == "AUCTION_BID")
+            {
+                boardManager.ApplyRemoteAuctionBid(packet.auctionBidder, packet.auctionBidAmount);
+                return;
+            }
 
             // Sync state into board manager
             boardManager.SyncStateFromNetwork(

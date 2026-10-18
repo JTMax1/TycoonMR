@@ -195,10 +195,24 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
                 sa.SaveAnchorAsync();
                 Debug.Log($"<color=#00FF88>[TycoonSpatialAnchor]</color> Physical table anchor locked and saved: UUID = {sa.Uuid}");
             }
-            catch (Exception e)
+    public void AlignToSharedAnchor(string remoteUuid)
+    {
+        if (string.IsNullOrEmpty(remoteUuid)) return;
+        string currentUuid = PlayerPrefs.GetString(PREF_ANCHOR_UUID, "");
+        if (currentUuid == remoteUuid) return;
+
+        PlayerPrefs.SetString(PREF_ANCHOR_UUID, remoteUuid);
+        PlayerPrefs.Save();
+
+        Debug.Log($"<color=#00FF88>[TycoonSpatialAnchor]</color> Aligning to shared Colocation anchor: {remoteUuid}");
+        if (anchorHolder != null && OVRManager.isHmdPresent)
+        {
+            try
             {
-                Debug.LogWarning($"[TycoonSpatialAnchor] SaveAnchorAsync note: {e.Message}");
+                OVRSpatialAnchor sa = anchorHolder.GetComponent<OVRSpatialAnchor>();
+                if (sa == null) sa = anchorHolder.AddComponent<OVRSpatialAnchor>();
             }
+            catch { }
         }
     }
 
