@@ -91,6 +91,9 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
 
     #region A. Physical 3D Executive Cash Briefcase & Live Stacks
 
+    private Vector3[] baseStackScales = new Vector3[6];
+    private Vector3[] baseStackPositions = new Vector3[6];
+
     private void SpawnExecutiveBriefcase()
     {
         if (briefcaseRoot != null) Destroy(briefcaseRoot);
@@ -98,16 +101,35 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
         briefcaseRoot = new GameObject("Executive_Cash_Briefcase");
         briefcaseRoot.transform.SetParent(transform, false);
 
-        // South-Left table corner: localPosition = new Vector3(-0.38f, 0.032f, -0.46f), localRotation = Quaternion.Euler(0f, 20f, 0f)
-        briefcaseRoot.transform.localPosition = new Vector3(-0.38f, 0.032f, -0.46f);
-        briefcaseRoot.transform.localRotation = Quaternion.Euler(0f, 20f, 0f);
+        // Dedicated Executive Side-Tray on outer South-West corner (completely outside property tiles)
+        briefcaseRoot.transform.localPosition = new Vector3(-0.62f, 0.020f, -0.42f);
+        briefcaseRoot.transform.localRotation = Quaternion.Euler(0f, 25f, 0f);
+
+        // Sleek dark-marble mini coaster underneath briefcase
+        GameObject coaster = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        coaster.name = "Executive_Side_Tray_Coaster";
+        coaster.transform.SetParent(briefcaseRoot.transform, false);
+        coaster.transform.localPosition = new Vector3(0f, -0.002f, 0f);
+        coaster.transform.localRotation = Quaternion.identity;
+        coaster.transform.localScale = new Vector3(0.16f, 0.015f, 0.12f);
+        Destroy(coaster.GetComponent<Collider>());
+        coaster.GetComponent<Renderer>().material = boardManager.CreateColoredMaterial(new Color(0.06f, 0.07f, 0.09f), 0.95f, 0.3f);
+
+        GameObject coasterRim = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        coasterRim.name = "Coaster_Gold_Trim";
+        coasterRim.transform.SetParent(coaster.transform, false);
+        coasterRim.transform.localPosition = Vector3.zero;
+        coasterRim.transform.localScale = new Vector3(1.04f, 0.6f, 1.04f);
+        Destroy(coasterRim.GetComponent<Collider>());
+        coasterRim.GetComponent<Renderer>().material = boardManager.CreateColoredMaterial(new Color(0.95f, 0.78f, 0.25f), 0.95f, 0.85f);
 
         if (boardManager.cashBriefcasePrefab != null)
         {
             GameObject prefabInst = Instantiate(boardManager.cashBriefcasePrefab, briefcaseRoot.transform);
             prefabInst.transform.localPosition = Vector3.zero;
             prefabInst.transform.localRotation = Quaternion.identity;
-            prefabInst.transform.localScale = Vector3.one * 0.12f;
+            boardManager.StripRoguePhysicsFromImportedPrefab(prefabInst);
+            boardManager.NormalizePrefabSize(prefabInst, 0.11f, true);
 
             // Search for lid
             Transform lid = prefabInst.transform.Find("Briefcase_Lid");
@@ -198,37 +220,49 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
         Material bandMat = boardManager.CreateColoredMaterial(new Color(0.96f, 0.96f, 0.94f), 0.9f); // Paper Band
         Material goldBarMat = boardManager.CreateColoredMaterial(new Color(1f, 0.84f, 0.22f), 0.95f, 0.9f); // Gold Ingot
 
-        // 6 Cash Stacks arranged in 2 rows of 3:
-        // Cols: X = -0.034f, 0f, 0.034f
-        // Rows: Z = -0.018f, 0.018f
         float[] xCols = new float[] { -0.034f, 0f, 0.034f };
         float[] zRows = new float[] { -0.018f, 0.018f };
+
+        GameObject bundlePrefab = boardManager.cashBundlePrefab != null ? boardManager.cashBundlePrefab : boardManager.dollarBillPrefab;
 
         int idx = 0;
         for (int r = 0; r < 2; r++)
         {
             for (int c = 0; c < 3; c++)
             {
-                GameObject stack = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                stack.name = $"Cash_Stack_{idx}";
-                stack.transform.SetParent(briefcaseRoot.transform, false);
-                stack.transform.localPosition = new Vector3(xCols[c], 0.021f, zRows[r]);
-                stack.transform.localRotation = Quaternion.Euler(0f, (idx % 2 == 0 ? 3f : -3f), 0f);
-                stack.transform.localScale = new Vector3(0.028f, 0.012f, 0.016f);
-                Destroy(stack.GetComponent<Collider>());
-                stack.GetComponent<Renderer>().material = billMat;
+                GameObject stack;
+                if (bundlePrefab != null)
+                {
+                    stack = Instantiate(bundlePrefab, briefcaseRoot.transform);
+                    stack.name = $"Cash_Bundle_{idx}";
+                    boardManager.StripRoguePhysicsFromImportedPrefab(stack);
+                    boardManager.NormalizePrefabSize(stack, 0.032f, true);
+                }
+                else
+                {
+                    stack = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    stack.name = $"Cash_Stack_{idx}";
+                    stack.transform.SetParent(briefcaseRoot.transform, false);
+                    stack.transform.localScale = new Vector3(0.028f, 0.012f, 0.016f);
+                    Destroy(stack.GetComponent<Collider>());
+                    stack.GetComponent<Renderer>().material = billMat;
 
-                // Center Paper Band
-                GameObject band = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                band.name = "Stack_Band";
-                band.transform.SetParent(stack.transform, false);
-                band.transform.localPosition = Vector3.zero;
-                band.transform.localScale = new Vector3(1.02f, 0.45f, 0.45f);
-                Destroy(band.GetComponent<Collider>());
-                band.GetComponent<Renderer>().material = bandMat;
+                    GameObject band = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    band.name = "Stack_Band";
+                    band.transform.SetParent(stack.transform, false);
+                    band.transform.localPosition = Vector3.zero;
+                    band.transform.localScale = new Vector3(1.02f, 0.45f, 0.45f);
+                    Destroy(band.GetComponent<Collider>());
+                    band.GetComponent<Renderer>().material = bandMat;
+                }
+
+                stack.transform.localPosition = new Vector3(xCols[c], 0.018f, zRows[r]);
+                stack.transform.localRotation = Quaternion.Euler(0f, (idx % 2 == 0 ? 3f : -3f), 0f);
+
+                baseStackScales[idx] = stack.transform.localScale;
+                baseStackPositions[idx] = stack.transform.localPosition;
 
                 cashStackObjects[idx] = stack;
-                cashStackBands[idx] = band.transform;
                 idx++;
             }
         }
@@ -236,18 +270,30 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
         // Gold Bullion Bars (visible when PlayerCash >= $3000)
         goldBarsHolder = new GameObject("Overflow_Gold_Bars");
         goldBarsHolder.transform.SetParent(briefcaseRoot.transform, false);
-        goldBarsHolder.transform.localPosition = new Vector3(0f, 0.040f, 0f);
+        goldBarsHolder.transform.localPosition = new Vector3(0f, 0.035f, 0f);
 
         for (int b = -1; b <= 1; b += 2)
         {
-            GameObject bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            bar.name = $"Gold_Bar_{b}";
-            bar.transform.SetParent(goldBarsHolder.transform, false);
-            bar.transform.localPosition = new Vector3(b * 0.016f, 0f, 0f);
+            GameObject bar;
+            if (boardManager.goldBarPrefab != null)
+            {
+                bar = Instantiate(boardManager.goldBarPrefab, goldBarsHolder.transform);
+                bar.name = $"Gold_Bar_{b}";
+                boardManager.StripRoguePhysicsFromImportedPrefab(bar);
+                boardManager.NormalizePrefabSize(bar, 0.030f, true);
+            }
+            else
+            {
+                bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                bar.name = $"Gold_Bar_{b}";
+                bar.transform.SetParent(goldBarsHolder.transform, false);
+                bar.transform.localScale = new Vector3(0.024f, 0.009f, 0.012f);
+                Destroy(bar.GetComponent<Collider>());
+                bar.GetComponent<Renderer>().material = goldBarMat;
+            }
+
+            bar.transform.localPosition = new Vector3(b * 0.018f, 0f, 0f);
             bar.transform.localRotation = Quaternion.Euler(0f, 15f * b, 0f);
-            bar.transform.localScale = new Vector3(0.024f, 0.009f, 0.012f);
-            Destroy(bar.GetComponent<Collider>());
-            bar.GetComponent<Renderer>().material = goldBarMat;
         }
 
         goldBarsHolder.SetActive(false);
@@ -257,41 +303,37 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
     {
         if (!isBriefcaseInitialized) return;
 
-        // Determine active count and stack height:
-        // $0 = 0 stacks
-        // $500 = 2 stacks (height ~ 0.008f to 0.015f)
-        // $1500 = 4 stacks (height ~ 0.015f to 0.025f)
-        // $3000+ = 6 tall stacks (height ~ 0.035f) + gold bullion bars
+        // Determine active count and smooth Y multiplier (1.0f to 1.8f of normalized base scale)
         int activeCount = 0;
-        float stackHeight = 0.004f;
+        float yMultiplier = 1.0f;
 
         if (cash <= 0)
         {
             activeCount = 0;
-            stackHeight = 0.002f;
+            yMultiplier = 0.001f;
         }
         else if (cash < 500)
         {
             activeCount = 2;
             float t = (float)cash / 500f;
-            stackHeight = Mathf.Lerp(0.004f, 0.015f, t);
+            yMultiplier = Mathf.Lerp(1.0f, 1.25f, t);
         }
         else if (cash < 1500)
         {
             activeCount = 4;
             float t = (float)(cash - 500) / 1000f;
-            stackHeight = Mathf.Lerp(0.015f, 0.025f, t);
+            yMultiplier = Mathf.Lerp(1.2f, 1.55f, t);
         }
         else if (cash < 3000)
         {
             activeCount = 6;
             float t = (float)(cash - 1500) / 1500f;
-            stackHeight = Mathf.Lerp(0.025f, 0.035f, t);
+            yMultiplier = Mathf.Lerp(1.4f, 1.8f, t);
         }
         else
         {
             activeCount = 6;
-            stackHeight = 0.036f;
+            yMultiplier = 1.8f;
         }
 
         for (int i = 0; i < 6; i++)
@@ -301,11 +343,8 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
             if (i < activeCount)
             {
                 cashStackObjects[i].SetActive(true);
-                Vector3 curScale = cashStackObjects[i].transform.localScale;
-                cashStackObjects[i].transform.localScale = new Vector3(curScale.x, stackHeight, curScale.z);
-
-                Vector3 curPos = cashStackObjects[i].transform.localPosition;
-                cashStackObjects[i].transform.localPosition = new Vector3(curPos.x, 0.016f + stackHeight * 0.5f, curPos.z);
+                Vector3 baseS = baseStackScales[i];
+                cashStackObjects[i].transform.localScale = new Vector3(baseS.x, baseS.y * yMultiplier, baseS.z);
             }
             else
             {
@@ -318,7 +357,7 @@ public class TycoonExecutiveBriefcaseAndTrophy : MonoBehaviour
             goldBarsHolder.SetActive(cash >= 3000);
             if (cash >= 3000)
             {
-                goldBarsHolder.transform.localPosition = new Vector3(0f, 0.020f + stackHeight, 0f);
+                goldBarsHolder.transform.localPosition = new Vector3(0f, 0.038f, 0f);
             }
         }
     }

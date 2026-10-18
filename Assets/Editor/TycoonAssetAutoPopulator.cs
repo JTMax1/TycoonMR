@@ -23,6 +23,8 @@ public static class TycoonAssetAutoPopulator
 
     public static void AutoPopulateSceneManagers(bool forceSave)
     {
+        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
         TycoonBoardManager[] managers = Object.FindObjectsByType<TycoonBoardManager>(FindObjectsInactive.Include);
         if (managers == null || managers.Length == 0) return;
 

@@ -85,6 +85,8 @@ public class TycoonBoardManager : MonoBehaviour
     public GameObject cashBriefcasePrefab;
     public GameObject bankVaultPrefab;
     public GameObject dollarBillPrefab;
+    public GameObject cashBundlePrefab;
+    public GameObject goldBarPrefab;
     public GameObject padlockPrefab;
     public GameObject steamPipeValvePrefab;
     public GameObject jackpotChestPrefab;
@@ -160,6 +162,8 @@ public class TycoonBoardManager : MonoBehaviour
     public TycoonSpatialAnchorAndDiorama SpatialAnchorAndDiorama => spatialAnchorAndDiorama;
     private TycoonExecutiveBriefcaseAndTrophy executiveBriefcaseAndTrophy;
     public TycoonExecutiveBriefcaseAndTrophy ExecutiveBriefcaseAndTrophy => executiveBriefcaseAndTrophy;
+    private TycoonColocationAndPolish colocationAndPolish;
+    public TycoonColocationAndPolish ColocationAndPolish => colocationAndPolish;
 
     public bool isPassAndPlayMode = false;
     public Vector3 LockedBoardPosition { get => lockedBoardPosition; set { lockedBoardPosition = value; transform.position = value; OnBoardPoseUpdated?.Invoke(lockedBoardPosition, lockedBoardRotation); } }
@@ -170,6 +174,7 @@ public class TycoonBoardManager : MonoBehaviour
         {
             playerCash[playerIdx] += delta;
             UpdateLiveHUDStats();
+            OnGameStateModified?.Invoke();
         }
     }
     public int CurrentTurnPlayer { get; private set; } = 0;
@@ -177,8 +182,66 @@ public class TycoonBoardManager : MonoBehaviour
     public event System.Action<int, int> OnRivalPaidRentToPlayer;
     public event System.Action OnVictoryTrophyTriggered;
     public event System.Action<Vector3, Quaternion> OnBoardPoseUpdated;
+    public event System.Action OnGameStateModified;
+
     public bool CheckAllRivalsBankruptPublic() => CheckAllRivalsBankrupt();
     public void TriggerVictoryTrophy() => OnVictoryTrophyTriggered?.Invoke();
+    public void NotifyGameStateModified() => OnGameStateModified?.Invoke();
+
+    public int[] GetPlayerCashArray() => (int[])playerCash.Clone();
+    public int[] GetPlayerPosArray() => (int[])playerPos.Clone();
+    public int[] GetTileOwnersArray()
+    {
+        int[] owners = new int[40];
+        for (int i = 0; i < 40; i++) owners[i] = board != null && board[i] != null ? board[i].owner : -1;
+        return owners;
+    }
+    public int[] GetTileLevelsArray()
+    {
+        int[] levels = new int[40];
+        for (int i = 0; i < 40; i++) levels[i] = board != null && board[i] != null ? board[i].buildingLevel : 0;
+        return levels;
+    }
+    public string GetPlayerNamePublic(int playerIdx) => GetPlayerName(playerIdx);
+    public Color GetPlayerColorPublic(int playerIdx) => GetPlayerColor(playerIdx);
+    public int CalculatePlayerNetWorthPublic(int playerIdx) => CalculatePlayerNetWorth(playerIdx);
+
+    public void SyncStateFromNetwork(int turnPlayer, int[] incomingCash, int[] incomingPos, int[] incomingOwners, int[] incomingLevels, string anchorUuid)
+    {
+        if (incomingCash != null && incomingCash.Length == 4)
+        {
+            for (int i = 0; i < 4; i++) playerCash[i] = incomingCash[i];
+        }
+        if (incomingPos != null && incomingPos.Length == 4)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (playerPos[i] != incomingPos[i])
+                {
+                    playerPos[i] = incomingPos[i];
+                    PositionTokenOnTile(i, playerPos[i]);
+                }
+            }
+        }
+        if (incomingOwners != null && incomingLevels != null && board != null)
+        {
+            for (int i = 0; i < 40 && i < incomingOwners.Length && i < incomingLevels.Length; i++)
+            {
+                if (board[i] == null) continue;
+                bool ownerChanged = board[i].owner != incomingOwners[i];
+                bool levelChanged = board[i].buildingLevel != incomingLevels[i];
+                if (ownerChanged || levelChanged)
+                {
+                    board[i].owner = incomingOwners[i];
+                    board[i].buildingLevel = incomingLevels[i];
+                    ApplyTileOwnershipVisuals(board[i], board[i].owner);
+                }
+            }
+            RebuildMonopolySynergyBeams();
+        }
+        CurrentTurnPlayer = turnPlayer;
+        UpdateLiveHUDStats();
+    }
     private GameObject jailLockpickButton;
     private bool isLockpickingInProgress = false;
 
@@ -517,6 +580,12 @@ public class TycoonBoardManager : MonoBehaviour
         if (executiveBriefcaseAndTrophy == null)
         {
             executiveBriefcaseAndTrophy = gameObject.AddComponent<TycoonExecutiveBriefcaseAndTrophy>();
+        }
+
+        colocationAndPolish = GetComponent<TycoonColocationAndPolish>();
+        if (colocationAndPolish == null)
+        {
+            colocationAndPolish = gameObject.AddComponent<TycoonColocationAndPolish>();
         }
 
         CacheMetaInteractionSDKHands();
@@ -2467,7 +2536,7 @@ public class TycoonBoardManager : MonoBehaviour
         {
             GameObject chestModel = Instantiate(jackpotChestPrefab, chestRoot.transform, false);
             StripRoguePhysicsFromImportedPrefab(chestModel);
-            NormalizePrefabSize(chestModel, 0.065f);
+            NormalizePrefabSize(chestModel, 0.055f, true);
             chestModel.transform.localPosition = Vector3.zero;
         }
         else
@@ -4147,9 +4216,10 @@ public class TycoonBoardManager : MonoBehaviour
         return holder.transform;
     }
 
-    public void NormalizePrefabSize(GameObject obj, float targetMaxSize)
+    public void NormalizePrefabSize(GameObject obj, float targetMaxSize, bool snapBottomToOrigin = true)
     {
-        Renderer[] renderers = obj.GetComponentsInChildren<Renderer>();
+        if (obj == null) return;
+        Renderer[] renderers = obj.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0) return;
 
         Bounds b = renderers[0].bounds;
@@ -4160,6 +4230,14 @@ public class TycoonBoardManager : MonoBehaviour
         {
             float scaleRatio = (targetMaxSize * transform.lossyScale.x) / maxDim;
             obj.transform.localScale *= scaleRatio;
+        }
+
+        if (snapBottomToOrigin)
+        {
+            b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+            float bottomOffset = obj.transform.position.y - b.min.y;
+            obj.transform.position += Vector3.up * bottomOffset;
         }
     }
 
@@ -5963,33 +6041,40 @@ public class TycoonBoardManager : MonoBehaviour
             waxSealStampPrefab = FindPrefabByNameOrFilter("WaxSeal", "Stamp", "Seal");
         if (auctionGavelPrefab == null)
             auctionGavelPrefab = FindPrefabByNameOrFilter("Gavel", "AuctionGavel", "Hammer", "Prop_ThrowingStick");
+        string[] casinoFolders = new string[] { "Assets/ithappy/Casino_Free", "Assets" };
+        string[] chessFolders = new string[] { "Assets/ithappy/Chess_Pack_Free", "Assets/ithappy/Casino_Free", "Assets" };
+
         if (cashBriefcasePrefab == null)
-            cashBriefcasePrefab = FindPrefabByNameOrFilter("Briefcase", "CashBriefcase", "Suitcase", "Prop_SmallStorageBox_02");
+            cashBriefcasePrefab = FindPrefabByNameOrFilter(casinoFolders, "Briefcase", "CashBriefcase", "Suitcase", "Case", "Prop_SmallStorageBox_02");
         if (bankVaultPrefab == null)
-            bankVaultPrefab = FindPrefabByNameOrFilter("BankVault", "Vault", "Safe", "Prop_SmallStorageBox_04");
+            bankVaultPrefab = FindPrefabByNameOrFilter(casinoFolders, "SafeBox_01", "BankVault", "Vault", "Safe", "Prop_SmallStorageBox_04");
         if (dollarBillPrefab == null)
-            dollarBillPrefab = FindPrefabByNameOrFilter("DollarBill", "Cash", "Money", "Dollar");
+            dollarBillPrefab = FindPrefabByNameOrFilter(casinoFolders, "Cash_01", "DollarBill", "Cash", "Money", "Dollar");
+        if (cashBundlePrefab == null)
+            cashBundlePrefab = FindPrefabByNameOrFilter(casinoFolders, "Cash_07", "Cash_11", "Cash_01", "Money", "Cash", "Banknote", "Bill", "Stack", "Bundle", "Chip");
+        if (goldBarPrefab == null)
+            goldBarPrefab = FindPrefabByNameOrFilter(casinoFolders, "Gold_Ingot_01", "Gold", "Ingot", "Bar", "Chip");
         if (padlockPrefab == null)
             padlockPrefab = FindPrefabByNameOrFilter("Padlock", "Lock", "Key");
         if (steamPipeValvePrefab == null)
             steamPipeValvePrefab = FindPrefabByNameOrFilter("SteamValve", "Valve", "Pipe", "Faucet", "Prop_Faucet_06", "Props_Hydrant");
         if (jackpotChestPrefab == null)
-            jackpotChestPrefab = FindPrefabByNameOrFilter("Chest", "TreasureChest", "Box_01", "Crate_01", "Prop_SmallStorageBox_01");
+            jackpotChestPrefab = FindPrefabByNameOrFilter("Prop_WoodenChest_02", "Chest", "TreasureChest", "Box_01", "Crate_01", "Prop_SmallStorageBox_01");
         if (pedestrianPrefab == null)
-            pedestrianPrefab = FindPrefabByNameOrFilter("Character", "Person", "Pedestrian", "Citizen");
+            pedestrianPrefab = FindPrefabByNameOrFilter(chessFolders, "Adult_Base", "ChessPlayer_01", "Basic_Character_Adult", "Character", "Person", "Pedestrian", "Citizen");
         if (crosswalkPropPrefab == null)
             crosswalkPropPrefab = FindPrefabByNameOrFilter("Crosswalk", "Road_Crosswalk");
         if (victoryTrophyPrefab == null)
-            victoryTrophyPrefab = FindPrefabByNameOrFilter("Trophy", "Cup", "Statue", "Award");
+            victoryTrophyPrefab = FindPrefabByNameOrFilter(chessFolders, "Chess_White_King_01", "Chess_Black_King_01", "Cup_02", "Cup_01", "King", "Queen", "Trophy", "Cup", "Crown", "Award");
 
         UnityEditor.EditorUtility.SetDirty(this);
     }
 
-    private GameObject FindPrefabByNameOrFilter(params string[] targetNames)
+    private GameObject FindPrefabByNameOrFilter(string[] searchFolders, params string[] targetNames)
     {
         foreach (string name in targetNames)
         {
-            string[] guids = UnityEditor.AssetDatabase.FindAssets($"{name} t:Prefab", new string[] { "Assets" });
+            string[] guids = UnityEditor.AssetDatabase.FindAssets($"{name} t:Prefab", searchFolders != null && searchFolders.Length > 0 ? searchFolders : new string[] { "Assets" });
             foreach (string guid in guids)
             {
                 string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
@@ -6001,6 +6086,11 @@ public class TycoonBoardManager : MonoBehaviour
             }
         }
         return null;
+    }
+
+    private GameObject FindPrefabByNameOrFilter(params string[] targetNames)
+    {
+        return FindPrefabByNameOrFilter(new string[] { "Assets" }, targetNames);
     }
 #endif
 }

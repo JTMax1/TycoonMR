@@ -284,6 +284,21 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
         rotationCoroutine = null;
     }
 
+    private class CourtyardPedestrianInfo
+    {
+        public Transform root;
+        public float progress;
+        public float speed;
+        public Animator animator;
+        public Animation legacyAnim;
+        public List<Transform> leftLegs = new List<Transform>();
+        public List<Transform> rightLegs = new List<Transform>();
+        public List<Transform> leftArms = new List<Transform>();
+        public List<Transform> rightArms = new List<Transform>();
+    }
+
+    private List<CourtyardPedestrianInfo> pedestrians = new List<CourtyardPedestrianInfo>();
+
     private void CreatePassAndPlay3DBadge()
     {
         if (passAndPlayBadgeGO != null) Destroy(passAndPlayBadgeGO);
@@ -292,10 +307,10 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
         passAndPlayBadgeGO.name = "PassAndPlay_3D_Toggle_Badge";
         passAndPlayBadgeGO.transform.SetParent(transform, false);
 
-        // Position on the South-East table border lip
-        passAndPlayBadgeGO.transform.localPosition = new Vector3(0.38f, 0.030f, -0.46f);
-        passAndPlayBadgeGO.transform.localRotation = Quaternion.Euler(0f, -18f, 0f);
-        passAndPlayBadgeGO.transform.localScale = new Vector3(0.135f, 0.016f, 0.048f);
+        // Position on the front utility row beside NEW GAME
+        passAndPlayBadgeGO.transform.localPosition = new Vector3(0.46f, 0.020f, -(boardManager.boardSize * 0.5f) - 0.12f);
+        passAndPlayBadgeGO.transform.localRotation = Quaternion.identity;
+        passAndPlayBadgeGO.transform.localScale = new Vector3(0.15f, 0.025f, 0.055f);
 
         passAndPlayBadgeRenderer = passAndPlayBadgeGO.GetComponent<Renderer>();
 
@@ -391,9 +406,10 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
             {
                 GameObject cw = Instantiate(boardManager.crosswalkPropPrefab, dioramaContainer.transform);
                 cw.name = $"Crosswalk_Corner_{c}";
+                boardManager.StripRoguePhysicsFromImportedPrefab(cw);
+                boardManager.NormalizePrefabSize(cw, 0.055f, true);
                 cw.transform.localPosition = cornerCenters[c];
                 cw.transform.localRotation = Quaternion.Euler(0f, cornerAngles[c], 0f);
-                cw.transform.localScale = Vector3.one * 0.045f;
             }
             else
             {
@@ -421,6 +437,7 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
 
     private void SpawnMiniaturePedestrians()
     {
+        pedestrians.Clear();
         pedestrianTransforms.Clear();
         pedestrianProgress.Clear();
         pedestrianSpeeds.Clear();
@@ -443,7 +460,8 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
             {
                 citizen = Instantiate(boardManager.pedestrianPrefab, dioramaContainer.transform);
                 citizen.name = $"Pedestrian_{i}";
-                citizen.transform.localScale = Vector3.one * 0.018f;
+                boardManager.StripRoguePhysicsFromImportedPrefab(citizen);
+                boardManager.NormalizePrefabSize(citizen, 0.026f, true);
             }
             else
             {
@@ -451,9 +469,59 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
                 citizen.transform.SetParent(dioramaContainer.transform, false);
             }
 
+            CourtyardPedestrianInfo pInfo = new CourtyardPedestrianInfo
+            {
+                root = citizen.transform,
+                progress = (float)i / count,
+                speed = 0.028f + (i % 3) * 0.004f,
+                animator = citizen.GetComponentInChildren<Animator>(),
+                legacyAnim = citizen.GetComponentInChildren<Animation>()
+            };
+
+            // Start any existing animations
+            if (pInfo.animator != null && pInfo.animator.runtimeAnimatorController != null)
+            {
+                pInfo.animator.enabled = true;
+            }
+            if (pInfo.legacyAnim != null)
+            {
+                pInfo.legacyAnim.Play();
+            }
+
+            // Find leg/arm child transforms for procedural walk cycle
+            DiscoverLimbs(citizen.transform, pInfo);
+
+            pedestrians.Add(pInfo);
             pedestrianTransforms.Add(citizen.transform);
-            pedestrianProgress.Add((float)i / count);
-            pedestrianSpeeds.Add(0.028f + (i % 3) * 0.004f);
+            pedestrianProgress.Add(pInfo.progress);
+            pedestrianSpeeds.Add(pInfo.speed);
+        }
+    }
+
+    private void DiscoverLimbs(Transform root, CourtyardPedestrianInfo info)
+    {
+        Transform[] allChildren = root.GetComponentsInChildren<Transform>(true);
+        foreach (Transform child in allChildren)
+        {
+            if (child == root) continue;
+            string n = child.name.ToLower();
+
+            if (n.Contains("leftupleg") || n.Contains("leg_l") || n.Contains("thigh_l") || n.Contains("l_thigh") || n.Contains("thigh.l"))
+            {
+                info.leftLegs.Add(child);
+            }
+            else if (n.Contains("rightupleg") || n.Contains("leg_r") || n.Contains("thigh_r") || n.Contains("r_thigh") || n.Contains("thigh.r"))
+            {
+                info.rightLegs.Add(child);
+            }
+            else if (n.Contains("leftarm") || n.Contains("arm_l") || n.Contains("shoulder_l") || n.Contains("l_arm"))
+            {
+                info.leftArms.Add(child);
+            }
+            else if (n.Contains("rightarm") || n.Contains("arm_r") || n.Contains("shoulder_r") || n.Contains("r_arm"))
+            {
+                info.rightArms.Add(child);
+            }
         }
     }
 
@@ -502,27 +570,45 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
 
     private void AnimateCourtyardPedestrians()
     {
-        for (int i = 0; i < pedestrianTransforms.Count; i++)
+        for (int i = 0; i < pedestrians.Count; i++)
         {
-            Transform t = pedestrianTransforms[i];
-            if (t == null) continue;
+            CourtyardPedestrianInfo p = pedestrians[i];
+            if (p.root == null) continue;
 
-            float progress = pedestrianProgress[i];
-            progress += (pedestrianSpeeds[i] / PERIMETER_LENGTH) * Time.deltaTime;
-            if (progress >= 1f) progress -= 1f;
-            pedestrianProgress[i] = progress;
+            p.progress += (p.speed / PERIMETER_LENGTH) * Time.deltaTime;
+            if (p.progress >= 1f) p.progress -= 1f;
 
             // Compute perimeter position and tangent direction
-            GetPerimeterPose(progress, out Vector3 pos, out Vector3 tangent);
+            GetPerimeterPose(p.progress, out Vector3 pos, out Vector3 tangent);
 
-            // Walking bob & subtle tilt
-            float bob = Mathf.Abs(Mathf.Sin(progress * 180f)) * 0.0015f;
-            float tilt = Mathf.Sin(progress * 90f) * 3.5f;
+            // Procedural walking step-bounce & side-to-side stride sway
+            float walkTime = Time.time * 10f + i * 1.5f;
+            float stepBounce = Mathf.Abs(Mathf.Sin(walkTime)) * 0.002f;
+            float strideSway = Mathf.Sin(walkTime) * 4.0f;
 
-            t.localPosition = new Vector3(pos.x, pos.y + bob, pos.z);
+            p.root.localPosition = new Vector3(pos.x, pos.y + stepBounce, pos.z);
             if (tangent.sqrMagnitude > 0.001f)
             {
-                t.localRotation = Quaternion.LookRotation(tangent, Vector3.up) * Quaternion.Euler(0f, 0f, tilt);
+                p.root.localRotation = Quaternion.LookRotation(tangent, Vector3.up) * Quaternion.Euler(0f, 0f, strideSway);
+            }
+
+            // Procedural limb swinging for static or rigged characters without active animator clips
+            float limbSwingAngle = Mathf.Sin(walkTime) * 25f;
+            foreach (Transform lLeg in p.leftLegs)
+            {
+                if (lLeg != null) lLeg.localRotation = Quaternion.Euler(limbSwingAngle, 0f, 0f);
+            }
+            foreach (Transform rLeg in p.rightLegs)
+            {
+                if (rLeg != null) rLeg.localRotation = Quaternion.Euler(-limbSwingAngle, 0f, 0f);
+            }
+            foreach (Transform lArm in p.leftArms)
+            {
+                if (lArm != null) lArm.localRotation = Quaternion.Euler(-limbSwingAngle * 0.8f, 0f, 0f);
+            }
+            foreach (Transform rArm in p.rightArms)
+            {
+                if (rArm != null) rArm.localRotation = Quaternion.Euler(limbSwingAngle * 0.8f, 0f, 0f);
             }
         }
     }
