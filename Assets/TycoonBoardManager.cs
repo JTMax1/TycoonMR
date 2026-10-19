@@ -1756,7 +1756,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             visualDie.transform.localPosition = Vector3.zero;
             visualDie.transform.localRotation = Quaternion.identity;
             StripRoguePhysicsFromImportedPrefab(visualDie);
-            NormalizePrefabSize(visualDie, 1.0f, snapBottomToOrigin: false);
+            NormalizePrefabSize(visualDie, 0.55f, snapBottomToOrigin: false);
         }
         else
         {
