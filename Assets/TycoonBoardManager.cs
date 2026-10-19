@@ -1744,7 +1744,7 @@ public partial class TycoonBoardManager : MonoBehaviour
         dieRoot.name = name;
         dieRoot.transform.SetParent(transform, false);
         dieRoot.transform.localPosition = localPos;
-        dieRoot.transform.localScale = Vector3.one * 0.045f;
+        dieRoot.transform.localScale = Vector3.one * 0.055f;
 
         if (dicePrefab != null)
         {
@@ -1756,7 +1756,7 @@ public partial class TycoonBoardManager : MonoBehaviour
             visualDie.transform.localPosition = Vector3.zero;
             visualDie.transform.localRotation = Quaternion.identity;
             StripRoguePhysicsFromImportedPrefab(visualDie);
-            NormalizePrefabSize(visualDie, 0.045f);
+            NormalizePrefabSize(visualDie, 1.0f, snapBottomToOrigin: false);
         }
         else
         {
@@ -1816,8 +1816,8 @@ public partial class TycoonBoardManager : MonoBehaviour
 
     void Create3DDiceAndHighDashboard()
     {
-        die1Transform = CreateExact3DPipsDie("Die_1", new Vector3(-0.055f, 0.052f, -0.05f), out physDie1);
-        die2Transform = CreateExact3DPipsDie("Die_2", new Vector3(0.055f, 0.052f, -0.05f), out physDie2);
+        die1Transform = CreateExact3DPipsDie("Die_1", new Vector3(-0.065f, 0.056f, -0.055f), out physDie1);
+        die2Transform = CreateExact3DPipsDie("Die_2", new Vector3(0.065f, 0.056f, -0.055f), out physDie2);
         die1Transform.localRotation = GetFlatDieRotationForValue(6);
         die2Transform.localRotation = GetFlatDieRotationForValue(6);
 

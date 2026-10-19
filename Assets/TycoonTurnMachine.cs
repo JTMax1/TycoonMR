@@ -44,13 +44,42 @@ public partial class TycoonBoardManager
             PlaySFX(diceRollSound, procDiceClip, 0.85f);
         }
 
-        int d1 = physDie1 != null ? physDie1.ReadTopFaceFromOrientation() : UnityEngine.Random.Range(1, 7);
-        int d2 = physDie2 != null ? physDie2.ReadTopFaceFromOrientation() : UnityEngine.Random.Range(1, 7);
+        if (physDie1 != null)
+        {
+            if (physDie1.isRolling) physDie1.SettleDieFlat();
+            else physDie1.SnapOrientationToFace(physDie1.currentFaceValue);
+        }
 
-        die1Transform.localPosition = new Vector3(-0.055f, 0.048f, -0.05f);
-        die2Transform.localPosition = new Vector3(0.055f, 0.048f, -0.05f);
-        die1Transform.localRotation = GetFlatDieRotationForValue(d1);
-        die2Transform.localRotation = GetFlatDieRotationForValue(d2);
+        if (physDie2 != null)
+        {
+            if (physDie2.isRolling) physDie2.SettleDieFlat();
+            else physDie2.SnapOrientationToFace(physDie2.currentFaceValue);
+        }
+
+        int d1 = physDie1 != null ? physDie1.currentFaceValue : UnityEngine.Random.Range(1, 7);
+        int d2 = physDie2 != null ? physDie2.currentFaceValue : UnityEngine.Random.Range(1, 7);
+
+        if (physDie1 == null && die1Transform != null)
+        {
+            die1Transform.localRotation = GetFlatDieRotationForValue(d1);
+        }
+
+        if (physDie2 == null && die2Transform != null)
+        {
+            die2Transform.localRotation = GetFlatDieRotationForValue(d2);
+        }
+
+        // Prevent overlap if both dice landed right next to each other
+        if (die1Transform != null && die2Transform != null)
+        {
+            Vector3 p1 = die1Transform.localPosition;
+            Vector3 p2 = die2Transform.localPosition;
+            if (Vector2.Distance(new Vector2(p1.x, p1.z), new Vector2(p2.x, p2.z)) < 0.06f)
+            {
+                die1Transform.localPosition = new Vector3(p1.x - 0.035f, 0.056f, p1.z);
+                die2Transform.localPosition = new Vector3(p2.x + 0.035f, 0.056f, p2.z);
+            }
+        }
 
         lastDiceTotal = d1 + d2;
         bool isDoubles = (d1 == d2);

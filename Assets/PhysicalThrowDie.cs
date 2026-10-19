@@ -39,7 +39,7 @@ public class PhysicalThrowDie : MonoBehaviour
         rb.angularDamping = 0.32f;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        rb.isKinematic = false;
+        rb.isKinematic = true;
 
         boxCol = GetComponent<BoxCollider>();
         PhysicsMaterial bounceMat = new PhysicsMaterial("TunedDiceBounce");
@@ -156,37 +156,38 @@ public class PhysicalThrowDie : MonoBehaviour
 
     void FixedUpdate()
     {
+        // Universal fall-through recovery: if die ever drops below the tabletop or drifts off the board
+        Vector3 localPos = transform.localPosition;
+        if (localPos.y < -0.15f || Mathf.Abs(localPos.x) > 0.65f || Mathf.Abs(localPos.z) > 0.65f || transform.position.y < -2.0f)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+            isRolling = false;
+            transform.localPosition = spawnLocalPos;
+            return;
+        }
+
         if (isRolling && !rb.isKinematic)
         {
             rb.AddForce(Physics.gravity * (extraGravityMultiplier - 1f), ForceMode.Acceleration);
 
-            // Bounded physics containment within courtyard (-0.30m to +0.30m relative to board)
-            Vector3 localPos = transform.localPosition;
-            
             // Soft inward physics restoring force if drifting outside courtyard boundary
-            if (Mathf.Abs(localPos.x) > 0.26f)
+            if (Mathf.Abs(localPos.x) > 0.22f)
             {
                 float sign = -Mathf.Sign(localPos.x);
                 Vector3 inwardDir = transform.parent != null ? transform.parent.TransformDirection(Vector3.right * sign) : Vector3.right * sign;
-                rb.AddForce(inwardDir * 6.5f, ForceMode.Acceleration);
+                rb.AddForce(inwardDir * 8.5f, ForceMode.Acceleration);
             }
-            if (Mathf.Abs(localPos.z) > 0.26f)
+            if (Mathf.Abs(localPos.z) > 0.22f)
             {
                 float sign = -Mathf.Sign(localPos.z);
                 Vector3 inwardDir = transform.parent != null ? transform.parent.TransformDirection(Vector3.forward * sign) : Vector3.forward * sign;
-                rb.AddForce(inwardDir * 6.5f, ForceMode.Acceleration);
-            }
-
-            // Fall-through recovery: if die somehow falls below board plane
-            if (localPos.y < -0.15f || Mathf.Abs(localPos.x) > 0.70f || Mathf.Abs(localPos.z) > 0.70f)
-            {
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-                transform.localPosition = spawnLocalPos + Vector3.up * 0.08f;
+                rb.AddForce(inwardDir * 8.5f, ForceMode.Acceleration);
             }
 
             rollTimer += Time.fixedDeltaTime;
-            if (rollTimer > 0.40f && rb.linearVelocity.sqrMagnitude < 0.003f && rb.angularVelocity.sqrMagnitude < 0.008f)
+            if (rollTimer > 0.45f && rb.linearVelocity.sqrMagnitude < 0.003f && rb.angularVelocity.sqrMagnitude < 0.008f)
             {
                 SettleDieFlat();
             }
@@ -234,16 +235,21 @@ public class PhysicalThrowDie : MonoBehaviour
         }
     }
 
-    void SettleDieFlat()
+    public void SettleDieFlat()
     {
         isRolling = false;
         rb.isKinematic = true;
         currentFaceValue = ReadTopFaceFromOrientation();
         SnapOrientationToFace(currentFaceValue);
+
+        // Clamp height firmly onto the Central Park lawn (y = 0.056f) while preserving natural (x, z) roll landing
+        Vector3 cur = transform.localPosition;
+        transform.localPosition = new Vector3(Mathf.Clamp(cur.x, -0.22f, 0.22f), 0.056f, Mathf.Clamp(cur.z, -0.22f, 0.22f));
+
         OnDieSettled?.Invoke(currentFaceValue);
     }
 
-    private void SnapOrientationToFace(int face)
+    public void SnapOrientationToFace(int face)
     {
         Vector3 localTargetUp;
         switch (face)
@@ -264,16 +270,26 @@ public class PhysicalThrowDie : MonoBehaviour
     {
         isHeldByPlayer = false;
         trackedHandGrabber = null;
-        transform.localPosition = spawnLocalPos + new Vector3(UnityEngine.Random.Range(-0.02f, 0.02f), 0.13f, UnityEngine.Random.Range(-0.02f, 0.02f));
+
+        // Start from varied elevation above Central Park
+        Vector3 currentPos = transform.localPosition;
+        float startX = Mathf.Clamp(currentPos.x + UnityEngine.Random.Range(-0.06f, 0.06f), -0.18f, 0.18f);
+        float startZ = Mathf.Clamp(currentPos.z + UnityEngine.Random.Range(-0.06f, 0.06f), -0.18f, 0.18f);
+        transform.localPosition = new Vector3(startX, 0.18f, startZ);
         transform.localRotation = UnityEngine.Random.rotation;
 
         rb.isKinematic = false;
         rb.linearVelocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
 
-        Vector3 throwForce = new Vector3(UnityEngine.Random.Range(-0.35f, 0.35f), 1.35f, UnityEngine.Random.Range(-0.35f, 0.35f));
-        rb.AddForce(throwForce * 0.16f, ForceMode.Impulse);
-        rb.AddTorque(UnityEngine.Random.onUnitSphere * 4.2f, ForceMode.Impulse);
+        // Dynamic varied toss with real impulse so each roll scatters distinctly
+        Vector3 throwForce = new Vector3(
+            UnityEngine.Random.Range(-0.85f, 0.85f),
+            UnityEngine.Random.Range(1.6f, 2.4f),
+            UnityEngine.Random.Range(-0.85f, 0.85f)
+        );
+        rb.AddForce(throwForce * 0.35f, ForceMode.Impulse);
+        rb.AddTorque(UnityEngine.Random.onUnitSphere * UnityEngine.Random.Range(18f, 34f), ForceMode.Impulse);
 
         isRolling = true;
         rollTimer = 0f;
