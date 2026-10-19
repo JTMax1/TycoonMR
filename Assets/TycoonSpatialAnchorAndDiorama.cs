@@ -237,8 +237,13 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
 
     #region B. Pass-and-Play Table Auto-Rotation
 
+    private float lastPassAndPlayToggleTime = 0f;
+
     public void TogglePassAndPlayMode()
     {
+        if (Time.time < lastPassAndPlayToggleTime + 0.6f) return;
+        lastPassAndPlayToggleTime = Time.time;
+
         boardManager.isPassAndPlayMode = !boardManager.isPassAndPlayMode;
         UpdatePassAndPlayBadgeVisuals();
         boardManager.PlaySFX(boardManager.CashRegisterSound, null, boardManager.isPassAndPlayMode ? 1.25f : 0.85f);
@@ -364,6 +369,10 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
         passAndPlayBadgeTMP.rectTransform.sizeDelta = new Vector2(280f, 100f);
 
         UpdatePassAndPlayBadgeVisuals();
+        if (boardManager != null)
+        {
+            boardManager.AttachNativeBuildingBlockPoke(passAndPlayBadgeGO, () => TogglePassAndPlayMode(), Vector3.up);
+        }
     }
 
     private void UpdatePassAndPlayBadgeVisuals()
@@ -386,16 +395,21 @@ public class TycoonSpatialAnchorAndDiorama : MonoBehaviour
 
     private void CheckPassAndPlayBadgePoke()
     {
-        if (passAndPlayBadgeGO == null) return;
+        if (passAndPlayBadgeGO == null || !passAndPlayBadgeGO.activeInHierarchy) return;
+        if (Time.time < lastPassAndPlayToggleTime + 0.6f) return;
+        if (!boardManager.IsRightIndexTracked && !boardManager.IsLeftIndexTracked) return;
+
         Collider badgeCol = passAndPlayBadgeGO.GetComponent<Collider>();
         if (badgeCol == null) return;
 
-        bool rightPoked = boardManager.IsRightHandTracked &&
-            Vector3.Distance(badgeCol.ClosestPoint(boardManager.RightHandWorldPos), boardManager.RightHandWorldPos) < 0.024f;
-        bool leftPoked = boardManager.IsLeftHandTracked &&
-            Vector3.Distance(badgeCol.ClosestPoint(boardManager.LeftHandWorldPos), boardManager.LeftHandWorldPos) < 0.024f;
+        float dRight = (boardManager.IsRightIndexTracked && boardManager.RightIndexTipWorldPos.y > -50f)
+            ? Vector3.Distance(badgeCol.ClosestPoint(boardManager.RightIndexTipWorldPos), boardManager.RightIndexTipWorldPos)
+            : float.MaxValue;
+        float dLeft = (boardManager.IsLeftIndexTracked && boardManager.LeftIndexTipWorldPos.y > -50f)
+            ? Vector3.Distance(badgeCol.ClosestPoint(boardManager.LeftIndexTipWorldPos), boardManager.LeftIndexTipWorldPos)
+            : float.MaxValue;
 
-        if (rightPoked || leftPoked)
+        if (Mathf.Min(dRight, dLeft) < 0.016f)
         {
             TogglePassAndPlayMode();
         }

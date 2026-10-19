@@ -131,7 +131,20 @@ public partial class TycoonBoardManager
                     for (int bIdx = 0; bIdx < skel.Bones.Count; bIdx++)
                     {
                         var bone = skel.Bones[bIdx];
-                        if (bone != null && bone.Id == OVRSkeleton.BoneId.Hand_IndexTip && bone.Transform != null)
+                        if (bone == null || bone.Transform == null) continue;
+
+                        bool isIndexTip = (bone.Id == OVRSkeleton.BoneId.Hand_IndexTip ||
+                                           bone.Id == OVRSkeleton.BoneId.XRHand_IndexTip);
+                        if (!isIndexTip)
+                        {
+                            string bName = bone.Transform.name.ToLower();
+                            if (bName.Contains("indextip") || bName.Contains("index_tip") || bName.EndsWith("index3"))
+                            {
+                                isIndexTip = true;
+                            }
+                        }
+
+                        if (isIndexTip)
                         {
                             Vector3 tipWorld = bone.Transform.position;
                             if (handedness == -1)
@@ -601,8 +614,6 @@ public partial class TycoonBoardManager
 
         if (closestIdx >= 0)
         {
-            lastButtonTouchTime = Time.time + 0.35f;
-            StartCoroutine(AnimateButtonPress(buttonTransforms[closestIdx]));
             return closestIdx;
         }
 
@@ -741,8 +752,6 @@ public partial class TycoonBoardManager
 
         if (closestIdx >= 0)
         {
-            lastButtonTouchTime = Time.time + 0.35f;
-            StartCoroutine(AnimateButtonPress(startMenuButtonTransforms[closestIdx]));
             return closestIdx;
         }
 

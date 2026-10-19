@@ -679,58 +679,45 @@ public partial class TycoonBoardManager : MonoBehaviour
             col = bc;
         }
 
-        PokeInteractable pokeInteractable = null;
-
-        if (buildingBlockPokeTemplate != null)
+        PokeInteractable pokeInteractable = targetObj.GetComponent<PokeInteractable>();
+        if (pokeInteractable == null)
         {
-            PokeInteractable templatePI = buildingBlockPokeTemplate.GetComponentInChildren<PokeInteractable>(true);
-            if (templatePI != null)
+            pokeInteractable = targetObj.GetComponentInChildren<PokeInteractable>(true);
+        }
+
+        if (pokeInteractable == null)
+        {
+            Transform surfaceTransform = targetObj.transform.Find("PokeSurface");
+            GameObject surfaceGO;
+            if (surfaceTransform == null)
             {
-                Transform existingChild = targetObj.transform.Find("[BuildingBlock] PokeInteractable");
-                if (existingChild == null)
-                {
-                    GameObject clonedChild = Instantiate(templatePI.gameObject, targetObj.transform);
-                    clonedChild.name = "[BuildingBlock] PokeInteractable";
-                    clonedChild.transform.localPosition = Vector3.zero;
+                surfaceGO = new GameObject("PokeSurface");
+                surfaceGO.transform.SetParent(targetObj.transform, false);
+                surfaceGO.transform.localPosition = new Vector3(0f, 0.5f, 0f);
 
-                    Quaternion surfaceRot = Quaternion.identity;
-                    if (surfaceFacing == Vector3.up) surfaceRot = Quaternion.Euler(90f, 0f, 0f);
-                    else if (surfaceFacing == Vector3.down) surfaceRot = Quaternion.Euler(-90f, 0f, 0f);
-                    else if (surfaceFacing != Vector3.zero) surfaceRot = Quaternion.LookRotation(-surfaceFacing, Vector3.up);
+                Quaternion surfaceRot = Quaternion.identity;
+                if (surfaceFacing == Vector3.up) surfaceRot = Quaternion.Euler(90f, 0f, 0f);
+                else if (surfaceFacing == Vector3.down) surfaceRot = Quaternion.Euler(-90f, 0f, 0f);
+                else if (surfaceFacing != Vector3.zero) surfaceRot = Quaternion.LookRotation(-surfaceFacing, Vector3.up);
 
-                    clonedChild.transform.localRotation = surfaceRot;
-                    clonedChild.transform.localScale = Vector3.one;
-
-                    foreach (Renderer r in clonedChild.GetComponentsInChildren<Renderer>(true))
-                    {
-                        r.enabled = false;
-                    }
-
-                    clonedChild.SetActive(true);
-                    pokeInteractable = clonedChild.GetComponent<PokeInteractable>();
-                }
-                else
-                {
-                    pokeInteractable = existingChild.GetComponent<PokeInteractable>();
-                }
+                surfaceGO.transform.localRotation = surfaceRot;
+                surfaceGO.transform.localScale = Vector3.one;
             }
-        }
+            else
+            {
+                surfaceGO = surfaceTransform.gameObject;
+            }
 
-        if (pokeInteractable == null)
-        {
-            pokeInteractable = targetObj.GetComponentInChildren<PokeInteractable>();
-        }
+            PlaneSurface plane = surfaceGO.GetComponent<PlaneSurface>();
+            if (plane == null) plane = surfaceGO.AddComponent<PlaneSurface>();
 
-        if (pokeInteractable == null)
-        {
-            PlaneSurface plane = targetObj.GetComponent<PlaneSurface>();
-            if (plane == null) plane = targetObj.AddComponent<PlaneSurface>();
+            BoundsClipper box = surfaceGO.GetComponent<BoundsClipper>();
+            if (box == null) box = surfaceGO.AddComponent<BoundsClipper>();
+            box.Position = Vector3.zero;
+            box.Size = new Vector3(1.2f, 1.2f, 0.4f);
 
-            BoundsClipper box = targetObj.GetComponent<BoundsClipper>();
-            if (box == null) box = targetObj.AddComponent<BoundsClipper>();
-
-            ClippedPlaneSurface clipped = targetObj.GetComponent<ClippedPlaneSurface>();
-            if (clipped == null) clipped = targetObj.AddComponent<ClippedPlaneSurface>();
+            ClippedPlaneSurface clipped = surfaceGO.GetComponent<ClippedPlaneSurface>();
+            if (clipped == null) clipped = surfaceGO.AddComponent<ClippedPlaneSurface>();
             clipped.InjectPlaneSurface(plane);
             clipped.InjectClippers(new List<IBoundsClipper> { box });
 
@@ -1901,26 +1888,89 @@ public partial class TycoonBoardManager : MonoBehaviour
         lastButtonTouchTime = Time.time + 0.35f;
 
         StartCoroutine(AnimateButtonPress(buttonTransforms[buttonIndex]));
+        PlayHaptic(0.35f, 0.12f);
+        PlaySFX(tokenMoveSound, procStepClip, 1.2f);
 
         switch (buttonIndex)
         {
             case 0:
                 spacePressed = true;
+                if (currentState == TurnState.WaitingForRoll)
+                {
+                    int p = CurrentTurnPlayer;
+                    if (inJail[p])
+                    {
+                        if (playerCash[p] >= 50)
+                        {
+                            playerCash[p] -= 50;
+                            inJail[p] = false;
+                            HideJailLockpickButton();
+                            ShatterJailCage(p);
+                            PlaySFX(cashRegisterSound, procCashClip, 1.2f);
+                            RefreshDashboard("PAID $50 BAIL!", $"Player {p + 1} paid bail! Free from Jail!");
+                            UpdateLiveHUDStats();
+                        }
+                    }
+                    else
+                    {
+                        StartCoroutine(ExecutePhysicsDiceRollTurn(true));
+                    }
+                }
+                else if (currentState == TurnState.BuyOrPassDecision && !isHoldingDeedCrystal)
+                {
+                    PurchaseCurrentTile(CurrentTurnPlayer);
+                }
+                else if (currentState == TurnState.AuctionInProgress)
+                {
+                    auctionPlayerBidFlag = true;
+                }
                 break;
             case 1:
                 buyPressed = true;
+                if (currentState == TurnState.BuyOrPassDecision && !isHoldingDeedCrystal)
+                {
+                    PurchaseCurrentTile(CurrentTurnPlayer);
+                }
+                else if (currentState == TurnState.AuctionInProgress)
+                {
+                    auctionPlayerBidFlag = true;
+                }
                 break;
             case 2:
                 passPressed = true;
+                if (currentState == TurnState.BuyOrPassDecision && !isHoldingDeedCrystal)
+                {
+                    BoardTile curTile = board[playerPos[CurrentTurnPlayer]];
+                    if (curTile != null && curTile.owner == -1 && (curTile.type == TileType.Property || curTile.type == TileType.Railroad || curTile.type == TileType.Utility))
+                    {
+                        StartCoroutine(RunPropertyAuctionCoroutine(curTile));
+                    }
+                    else
+                    {
+                        HideDeedCard();
+                        RefreshDashboard("PASSED ON DEED", "Passing turn to next Mogul...");
+                        StartCoroutine(EndPlayerTurn(false));
+                    }
+                }
+                else if (currentState == TurnState.AuctionInProgress)
+                {
+                    auctionPlayerDropFlag = true;
+                }
                 break;
             case 3:
                 upgradePressed = true;
+                TryBuildChronologically(CurrentTurnPlayer);
                 break;
             case 4:
                 takeoverPressed = true;
+                if (currentState == TurnState.WaitingForRoll || currentState == TurnState.BuyOrPassDecision)
+                {
+                    TryExecuteHostileTakeover();
+                }
                 break;
             case 5:
                 vrViewPressed = true;
+                TogglePenthouseScaleShift();
                 break;
             case 6:
                 AdjustBoardScale(-0.12f);
